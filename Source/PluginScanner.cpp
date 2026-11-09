@@ -326,13 +326,12 @@ namespace
         return total;
     }
 
-    /** "Date d'ajout" du Finder (ATTR_CMNEXT_ADDEDTIME), repli sur la date de création. */
+    /** "Date d'ajout" du Finder (ATTR_CMN_ADDEDTIME), repli sur la date de création. */
     juce::Time installDateFor (const std::string& path)
     {
         struct attrlist request {};
         request.bitmapcount = ATTR_BIT_MAP_COUNT;
-        request.commonattr  = ATTR_CMN_RETURNED_ATTRS;
-        request.forkattr    = ATTR_CMNEXT_ADDEDTIME;
+        request.commonattr  = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_ADDEDTIME;
 
         struct
         {
@@ -342,8 +341,8 @@ namespace
         } __attribute__ ((aligned (4), packed)) reply {};
 
         if (::getattrlist (path.c_str(), &request, &reply, sizeof (reply),
-                           FSOPT_ATTR_CMN_EXTENDED | FSOPT_NOFOLLOW) == 0
-            && (reply.returned.forkattr & ATTR_CMNEXT_ADDEDTIME) != 0
+                           FSOPT_NOFOLLOW) == 0
+            && (reply.returned.commonattr & ATTR_CMN_ADDEDTIME) != 0
             && reply.added.tv_sec > 0)
         {
             return juce::Time ((juce::int64) reply.added.tv_sec * 1000 + reply.added.tv_nsec / 1000000);

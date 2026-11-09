@@ -22,7 +22,7 @@ AuraClean/
    de quarantaine, puis répartit `inspectBundle()` sur 2–8 threads. Aucun binaire n'est chargé.
 2. `inspectBundle()` : Info.plist via `CFPropertyListCreateWithData` (XML **et** binaire), moduleinfo.json
    (commentaires / virgules JSON5 tolérés), taille via `fts(3)`, date = « Date d'ajout » Finder
-   (`ATTR_CMNEXT_ADDEDTIME`, repli `st_birthtime`), architecture via `MachOInspector`.
+   (`ATTR_CMN_ADDEDTIME`, repli `st_birthtime`), architecture via `MachOInspector`.
 3. `buildCatalogue()` résout la marque par niveaux de confiance :
    nom AU `"Vendor: Plugin"` (100) › moduleinfo (90) › code fabricant AU 4CC **appris** sur les AU
    bien identifiés (80) › propagation par domaine de `CFBundleIdentifier` (75) › bundle id (60) ›
