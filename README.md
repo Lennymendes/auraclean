@@ -43,6 +43,22 @@ AuraClean/
   (`realpath`) dans un dossier autorisé, destination = dossier connu, quoting POSIX + AppleScript.
 - Après toute action sur des AU : `killall -9 AudioComponentRegistrar` (cache AU reconstruit).
 
+## Télécharger l'app (GitHub Actions)
+
+Chaque push sur `main` compile une app Universal (arm64 + x86_64) sur un runner macOS.
+
+- **Build ponctuel** : onglet *Actions* → dernier run « Build macOS » → section *Artifacts* → `AuraClean-macOS`
+  (contient `AuraClean-macOS.dmg` et `AuraClean-macOS.zip`).
+- **Release publique** : *Actions* → « Build macOS » → *Run workflow* → renseigner `release_tag` (ex. `v1.0.0`).
+  La Release apparaît ensuite dans l'onglet *Releases* avec le `.dmg` et le `.zip`. Pousser un tag `v*` fait la même chose.
+
+L'app est signée **ad-hoc** (pas de certificat Developer ID dans la CI) : au premier lancement, macOS la bloque.
+Clic droit sur AuraClean.app → *Ouvrir*, ou bien :
+
+```bash
+xattr -cr /Applications/AuraClean.app
+```
+
 ## Build
 
 ```bash
