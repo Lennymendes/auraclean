@@ -18,6 +18,8 @@
 #include <thread>
 #include <vector>
 
+#include "DeepCleanDialog.h"
+#include "LeftoverScanner.h"
 #include "PluginScanner.h"
 #include "UninstallerMac.h"
 
@@ -215,7 +217,13 @@ private:
 
     void requestOperation (Operation);
     void runOperation (Operation, std::vector<int> bundleIndices);
-    void operationFinished (Operation, const OperationReport&);
+    void operationFinished (Operation, const OperationReport&, juce::int64 bytesOverride = -1);
+
+    // Deep Clean (désinstallation complète)
+    void startDeepClean (std::vector<int> bundleIndices, int hiddenCount);
+    void showDeepClean (std::vector<CleanGroup> groups, const juce::String& warning, bool leftoversSearched);
+    void closeDeepClean();
+    void runTrash (std::vector<CleanCandidate> items);
 
     void joinWorker();
     void setupChip (juce::TextButton&, const juce::String& text, juce::Colour accent);
@@ -239,7 +247,8 @@ private:
     juce::TextButton enableButton, disableButton, uninstallButton;
     SelectionSummary summary;
 
-    BusyOverlay         overlay;
+    BusyOverlay                      overlay;
+    std::unique_ptr<DeepCleanDialog> deepCleanDialog;
     juce::TooltipWindow tooltips { this, 450 };
 
     // Travail en arrière-plan (un seul job à la fois)

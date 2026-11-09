@@ -40,10 +40,26 @@ struct OperationReport
     bool authorisationCancelled      = false;
 };
 
+/** Élément d'un lot « Deep Clean » : bundle de plugin OU fichier résiduel. */
+struct TrashItem
+{
+    juce::File   file;
+    bool         isPluginBundle = true;
+    juce::File   pruneIfEmpty;  // dossier <Vendor> à supprimer s'il ne reste que .DS_Store
+    juce::String vendorKey;     // garde-fou : refuse <Racine>/<Vendor> lui-même
+};
+
 namespace UninstallerMac
 {
     /** Envoie les bundles à la Corbeille de l'utilisateur. Bloquant, à appeler hors du message thread. */
     OperationReport moveToTrash (const std::vector<juce::File>& bundles, const std::vector<juce::File>& allowedRoots);
+
+    /** Lot complet bundles + résidus : UNE seule élévation administrateur pour tout ce qui en a besoin,
+        y compris la suppression des dossiers <Vendor> devenus vides. Bloquant, hors message thread. */
+    OperationReport moveItemsToTrash (const std::vector<TrashItem>& items, const std::vector<juce::File>& pluginRoots);
+
+    /** Résidu : dans une racine LeftoverScanner (ou reçu .bom/.plist), non protégé, jamais <Racine>/<Vendor>. */
+    bool isSafeLeftoverPath (const juce::File& file, const juce::String& vendorKey, juce::String& reason);
 
     /** Déplace les bundles (quarantaine ou réactivation). Bloquant, hors du message thread. */
     OperationReport moveBundles (const std::vector<BundleMove>& moves, const std::vector<juce::File>& allowedRoots);

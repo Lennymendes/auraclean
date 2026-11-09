@@ -6,11 +6,14 @@
 #import <Foundation/Foundation.h>
 
 #include "UninstallerMac.h"
+#include "LeftoverScanner.h"
+#include "PluginScanner.h"
 
 #include <cerrno>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <map>
 #include <set>
 #include <sys/stat.h>
@@ -340,51 +343,220 @@ bool UninstallerMac::requiresAdministrator (const juce::File& bundle, const juce
 //==============================================================================
 OperationReport UninstallerMac::moveToTrash (const std::vector<juce::File>& bundles, const std::vector<juce::File>& roots)
 {
+    std::vector<TrashItem> items;
+
+    for (const auto& b : bundles)
+        items.push_back ({ b, true, {}, {} });
+
+    return moveItemsToTrash (items, roots);
+}
+
+//==============================================================================
+bool UninstallerMac::isSafeLeftoverPath (const juce::File& file, const juce::String& vendorKey, juce::String& reason)
+{
+    const auto path = file.getFullPathName();
+
+    if (path.isEmpty() || ! path.startsWithChar ('/') || hasControlCharacters (path)
+        || path.contains ("/../") || path.endsWith ("/..") || path.contains ("/./"))
+    {
+        reason = txt ("chemin invalide");
+        return false;
+    }
+
+    if (! existsNoFollow (file))
+    {
+        reason = txt ("introuvable sur le disque");
+        return false;
+    }
+
+    if (LeftoverScanner::isProtectedPath (file))
+    {
+        reason = txt ("emplacement protégé");
+        return false;
+    }
+
+    const auto parentReal = resolvedPath (file.getParentDirectory().getFullPathName());
+
+    if (parentReal.isEmpty())
+    {
+        reason = txt ("dossier parent inaccessible");
+        return false;
+    }
+
+    // Reçus d'installation : uniquement les .bom / .plist directement dans /var/db/receipts
+    if (parentReal == resolvedPath (LeftoverScanner::receiptsFolder().getFullPathName()))
+    {
+        const auto ext = file.getFileExtension().toLowerCase();
+
+        if ((ext == ".bom" || ext == ".plist") && ! file.isDirectory())
+            return true;
+
+        reason = txt ("fichier de reçu inattendu");
+        return false;
+    }
+
+    bool inside = false, topLevel = false;
+
+    for (const auto& root : LeftoverScanner::searchRoots())
+    {
+        const auto rootReal = resolvedPath (root.folder.getFullPathName());
+
+        if (rootReal.isEmpty())
+            continue;
+
+        if (parentReal == rootReal)
+        {
+            inside = topLevel = true;
+            break;
+        }
+
+        if (parentReal.startsWith (rootReal + "/"))
+            inside = true;
+    }
+
+    if (! inside)
+    {
+        reason = txt ("hors des emplacements de fichiers résiduels autorisés");
+        return false;
+    }
+
+    // Règle anti-collision : jamais <Racine>/<Vendor>, toujours <Vendor>/<Plugin>
+    if (topLevel && vendorKey.isNotEmpty() && file.isDirectory()
+        && PluginScanner::normaliseKey (file.getFileName()) == vendorKey)
+    {
+        reason = txt ("dossier de marque partagé par d'autres plugins");
+        return false;
+    }
+
+    return true;
+}
+
+namespace
+{
+    /** Le dossier <Vendor> doit être exactement au premier niveau d'une racine de résidus. */
+    bool isSafePruneFolder (const juce::File& folder)
+    {
+        if (folder == juce::File() || ! folder.isDirectory() || folder.isSymbolicLink())
+            return false;
+
+        const auto name = folder.getFileName();
+
+        if (name.isEmpty() || LeftoverScanner::isSharedFolderName (name))
+            return false;
+
+        const auto parentReal = resolvedPath (folder.getParentDirectory().getFullPathName());
+
+        for (const auto& root : LeftoverScanner::searchRoots())
+            if (parentReal.isNotEmpty() && parentReal == resolvedPath (root.folder.getFullPathName()))
+                return true;
+
+        return false;
+    }
+
+    /** Vide ou ne contient que des .DS_Store. */
+    bool isEffectivelyEmpty (const juce::File& folder)
+    {
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories))
+            if (entry.getFile().getFileName() != ".DS_Store")
+                return false;
+
+        return true;
+    }
+
+    /** Version utilisateur : supprime .DS_Store puis rmdir. */
+    bool pruneFolderIfEmpty (const juce::File& folder)
+    {
+        if (! isSafePruneFolder (folder) || ! isEffectivelyEmpty (folder))
+            return false;
+
+        folder.getChildFile (".DS_Store").deleteFile();
+        return ::rmdir (folder.getFullPathName().toRawUTF8()) == 0;
+    }
+
+    /** Version root, ajoutée à la fin du script privilégié (après les déplacements). */
+    juce::String privilegedPruneCommand (const juce::File& folder)
+    {
+        const auto q = shellQuote (folder.getFullPathName());
+        return "if [ -d " + q + " ] && [ ! -L " + q + " ] && [ -z \"$(/bin/ls -A " + q
+             + " | /usr/bin/grep -v '^\\.DS_Store$')\" ]; then /bin/rm -f " + q + "/.DS_Store; /bin/rmdir " + q + "; fi; ";
+    }
+} // namespace
+
+//==============================================================================
+OperationReport UninstallerMac::moveItemsToTrash (const std::vector<TrashItem>& items, const std::vector<juce::File>& roots)
+{
     OperationReport report;
-    report.requested = (int) bundles.size();
+    report.requested = (int) items.size();
 
     NSFileManager* fm = [NSFileManager defaultManager];
     std::vector<juce::File> privileged;
+    std::vector<juce::File> pruneCandidates;
+
+    for (const auto& item : items)
+        if (item.pruneIfEmpty != juce::File()
+            && std::find (pruneCandidates.begin(), pruneCandidates.end(), item.pruneIfEmpty) == pruneCandidates.end())
+            pruneCandidates.push_back (item.pruneIfEmpty);
 
     //---------------------------------------------------- 1. sans privilèges
-    for (const auto& bundle : bundles)
+    for (const auto& item : items)
     {
         @autoreleasepool
         {
+            const auto& file = item.file;
             juce::String reason;
 
-            if (! isSafePluginPath (bundle, roots, reason))
+            const bool safe = item.isPluginBundle ? isSafePluginPath (file, roots, reason)
+                                                  : isSafeLeftoverPath (file, item.vendorKey, reason);
+            if (! safe)
             {
-                report.errors.add (bundle.getFileName() + " : " + reason);
+                report.errors.add (file.getFileName() + " : " + reason);
                 continue;
             }
 
-            if (requiresAdministrator (bundle))
+            if (requiresAdministrator (file))
             {
-                privileged.push_back (bundle);
+                privileged.push_back (file);
                 continue;
             }
 
             NSError* error = nil;
 
-            if ([fm trashItemAtURL: toURL (bundle) resultingItemURL: nil error: &error])
+            if ([fm trashItemAtURL: toURL (file) resultingItemURL: nil error: &error])
             {
                 ++report.succeeded;
-                report.succeededPaths.add (bundle.getFullPathName());
+                report.succeededPaths.add (file.getFullPathName());
             }
             else if (isPermissionError (error))
             {
-                privileged.push_back (bundle);
+                privileged.push_back (file);
             }
             else
             {
-                report.errors.add (bundle.getFileName() + " : " + fromNS (error.localizedDescription));
+                report.errors.add (file.getFileName() + " : " + fromNS (error.localizedDescription));
             }
         }
     }
 
-    if (privileged.empty())
+    // Dossiers <Vendor> à élaguer qui exigent root (parent non inscriptible) et sont déjà vides
+    // ou le deviendront après le lot privilégié.
+    std::vector<juce::File> privilegedPrunes;
+
+    for (const auto& folder : pruneCandidates)
+    {
+        if (! isSafePruneFolder (folder) || canWrite (folder.getParentDirectory()))
+            continue;
+
+        if (! privileged.empty() || isEffectivelyEmpty (folder))
+            privilegedPrunes.push_back (folder);
+    }
+
+    if (privileged.empty() && privilegedPrunes.empty())
+    {
+        for (const auto& folder : pruneCandidates)
+            pruneFolderIfEmpty (folder);
+
         return report;
+    }
 
     //---------------------------------------------------- 2. lot root unique
     const auto staging = makeStagingFolder();
@@ -406,6 +578,9 @@ OperationReport UninstallerMac::moveToTrash (const std::vector<juce::File>& bund
                                   + " && /usr/sbin/chown -R " + uid + ":" + gid + " " + shellQuote (target.getFullPathName()));
     }
 
+    for (const auto& folder : privilegedPrunes)
+        script << privilegedPruneCommand (folder);
+
     script << "exit 0";
 
     report.usedAdministratorPrivileges = true;
@@ -413,8 +588,14 @@ OperationReport UninstallerMac::moveToTrash (const std::vector<juce::File>& bund
 
     if (! pr.executed)
     {
-        reportPrivilegeFailure (report, pr, privileged.size());
+        if (! privileged.empty())
+            reportPrivilegeFailure (report, pr, privileged.size());
+
         removeIfEmpty (staging);
+
+        for (const auto& folder : pruneCandidates)
+            pruneFolderIfEmpty (folder);
+
         return report;
     }
 
@@ -431,18 +612,14 @@ OperationReport UninstallerMac::moveToTrash (const std::vector<juce::File>& bund
                 continue;
             }
 
+            ++report.succeeded;
+            report.succeededPaths.add (privileged[i].getFullPathName());
+
             NSError* error = nil;
 
-            if ([fm trashItemAtURL: toURL (stagedTargets[i]) resultingItemURL: nil error: &error])
+            if (! [fm trashItemAtURL: toURL (stagedTargets[i]) resultingItemURL: nil error: &error])
             {
-                ++report.succeeded;
-                report.succeededPaths.add (privileged[i].getFullPathName());
-            }
-            else
-            {
-                // Le plugin n'est déjà plus vu par les DAW ; on signale où il se trouve.
-                ++report.succeeded;
-                report.succeededPaths.add (privileged[i].getFullPathName());
+                // Déjà retiré de son emplacement : on signale où il se trouve.
                 report.leftovers.add (stagedTargets[i].getFullPathName());
                 report.errors.add (privileged[i].getFileName() + txt (" : retiré, mais non envoyé à la Corbeille (")
                                    + fromNS (error.localizedDescription) + ")");
@@ -451,6 +628,11 @@ OperationReport UninstallerMac::moveToTrash (const std::vector<juce::File>& bund
     }
 
     removeIfEmpty (staging);
+
+    //---------------------------------------------------- 4. élagage des <Vendor> restants (droits utilisateur)
+    for (const auto& folder : pruneCandidates)
+        pruneFolderIfEmpty (folder);
+
     return report;
 }
 

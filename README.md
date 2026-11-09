@@ -12,6 +12,8 @@ AuraClean/
     ├── MachOInspector.h      Lecture des 4 premiers Ko : thin / fat / fat64 → ARM64, x86_64…
     ├── PluginScanner.h/.cpp  Scan passif multi-thread, Info.plist (CF), moduleinfo.json, catalogue
     ├── UninstallerMac.h/.mm  Corbeille / quarantaine, élévation groupée, garde-fous de chemins
+    ├── LeftoverScanner.h/.cpp  Deep Clean : fichiers résiduels + reçus .pkg (lsbom)
+    ├── DeepCleanDialog.h/.cpp  Modale arborescente : cases, badges, chemins, tailles, total
     ├── AuraLookAndFeel.h     Thème #0D0E12, cyan / violet, chips, header de table, scrollbars
     └── MainComponent.h/.cpp  Library (filtres + sélection), VendorSidebar, PluginTable, overlay
 ```
@@ -42,6 +44,24 @@ AuraClean/
 - Garde-fous : extension obligatoire, pas de `..` ni de caractères de contrôle, parent résolu
   (`realpath`) dans un dossier autorisé, destination = dossier connu, quoting POSIX + AppleScript.
 - Après toute action sur des AU : `killall -9 AudioComponentRegistrar` (cache AU reconstruit).
+
+## Deep Clean (désinstallation complète)
+
+« Désinstaller » ouvre une modale listant, par plugin, les bundles ET les fichiers résiduels :
+`Application Support`, `Audio/Presets`, `Preferences` (+ `ByHost`), `Caches`, `Logs` (dans `/Library` et
+`~/Library`), `/Users/Shared`, `~/Documents/VST3 Presets`, `~/Music/Audio Music Apps/Plug-In Settings`,
+et les reçus `/var/db/receipts/*.bom|.plist` (contenu lu via `lsbom -fls`).
+
+Règles de sécurité :
+- **Formats complets** : les résidus ne sont recherchés (et cochables) que si **tous** les formats installés du
+  plugin sont cochés. Décocher un bundle dans la modale verrouille ses résidus.
+- **Anti-collision marque** : jamais `<Racine>/<Vendor>`, uniquement `<Vendor>/<Plugin>`. Le dossier `<Vendor>`
+  est supprimé ensuite **seulement** s'il est vide (ou ne contient que `.DS_Store`). Revérifié dans `UninstallerMac.mm`.
+- **Reçus .pkg** : retenus uniquement s'ils référencent un bundle supprimé et aucun plugin encore installé.
+  Un dossier déduit du `.bom` n'est retenu que si son nom correspond au plugin ou si **tous** ses fichiers
+  proviennent de ce `.bom` ; les noms génériques (`Shared`, `Presets`…) et partagés (Avid, PACE, iLok…) sont exclus.
+- Presets utilisateur (`~/Documents/VST3 Presets`, réglages Logic, `~/Library/Audio/Presets`) : **décochés par défaut**.
+- Bundles + résidus + élagage des dossiers `<Vendor>` vides passent dans **un seul** lot administrateur.
 
 ## Télécharger l'app (GitHub Actions)
 

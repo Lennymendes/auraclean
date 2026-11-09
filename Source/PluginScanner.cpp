@@ -151,7 +151,7 @@ namespace
         return {};  // CFData, CFDate... non utilisés
     }
 
-    juce::var readPropertyList (const juce::File& file)
+    juce::var readPlistFile (const juce::File& file)
     {
         juce::MemoryBlock block;
 
@@ -581,6 +581,8 @@ namespace
     }
 } // namespace
 
+juce::var PluginScanner::readPropertyList (const juce::File& file) { return readPlistFile (file); }
+
 //==============================================================================
 //  Heuristiques publiques
 //==============================================================================
@@ -810,7 +812,7 @@ PluginBundle PluginScanner::inspectBundle (const juce::File& bundleFile, const S
     if (bundleFile.isDirectory())
     {
         const auto contents = bundleFile.getChildFile ("Contents");
-        const auto info     = readPropertyList (contents.getChildFile ("Info.plist"));
+        const auto info     = readPlistFile (contents.getChildFile ("Info.plist"));
 
         b.bundleId = prop (info, "CFBundleIdentifier").toString().trim();
         b.version  = prop (info, "CFBundleShortVersionString").toString().trim();

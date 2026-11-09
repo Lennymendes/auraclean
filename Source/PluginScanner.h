@@ -152,6 +152,9 @@ public:
     /** Résolution des marques, regroupement par plugin, agrégats et résumé par marque. */
     static void buildCatalogue (ScanResult& result);
 
+    /** Info.plist / reçu .pkg (XML ou binaire) via CoreFoundation → juce::var. */
+    static juce::var readPropertyList (const juce::File& plistFile);
+
     // Heuristiques exposées (utiles pour les tests)
     static juce::String normaliseKey (const juce::String&);
     static juce::String vendorFromBundleIdentifier (const juce::String&);

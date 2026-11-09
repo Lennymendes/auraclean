@@ -51,6 +51,8 @@ juce_add_gui_app(AuraClean
     PLIST_TO_MERGE               "<plist><dict>
         <key>NSAppleEventsUsageDescription</key>
         <string>AuraClean needs administrator authorisation to move system-wide plug-ins.</string>
+        <key>NSDocumentsFolderUsageDescription</key>
+        <string>AuraClean looks for leftover VST3 presets in Documents/VST3 Presets when you fully uninstall a plug-in.</string>
         <key>LSApplicationCategoryType</key>
         <string>public.app-category.music</string>
         <key>NSRequiresAquaSystemAppearance</key>
@@ -62,6 +64,10 @@ target_sources(AuraClean PRIVATE
     Source/MainComponent.cpp
     Source/MainComponent.h
     Source/AuraLookAndFeel.h
+    Source/DeepCleanDialog.cpp
+    Source/DeepCleanDialog.h
+    Source/LeftoverScanner.cpp
+    Source/LeftoverScanner.h
     Source/PluginScanner.cpp
     Source/PluginScanner.h
     Source/MachOInspector.h

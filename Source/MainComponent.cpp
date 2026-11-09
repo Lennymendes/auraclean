@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <set>
 #include <unordered_set>
 
@@ -1290,6 +1291,9 @@ void MainComponent::resized()
     auto area = getLocalBounds();
     overlay.setBounds (area);
 
+    if (deepCleanDialog != nullptr)
+        deepCleanDialog->setBounds (area);
+
     headerArea = area.removeFromTop (68);
     bottomArea = area.removeFromBottom (68);
     sidebar.setBounds (area.removeFromLeft (270));
@@ -1344,6 +1348,9 @@ void MainComponent::resized()
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     const auto cmd = juce::ModifierKeys::commandModifier;
+
+    if (deepCleanDialog != nullptr)
+        return deepCleanDialog->keyPressed (key);
 
     if (key == juce::KeyPress ('f', cmd, 0))
     {
@@ -1486,6 +1493,12 @@ void MainComponent::requestOperation (Operation op)
     if (targets.empty())
         return;
 
+    if (op == Operation::Uninstall)
+    {
+        startDeepClean (std::move (targets), hidden);
+        return;
+    }
+
     juce::String title, message, confirm;
     auto icon = juce::MessageBoxIconType::QuestionIcon;
 
@@ -1600,21 +1613,26 @@ void MainComponent::runOperation (Operation op, std::vector<int> bundleIndices)
     });
 }
 
-void MainComponent::operationFinished (Operation op, const OperationReport& report)
+void MainComponent::operationFinished (Operation op, const OperationReport& report, juce::int64 bytesOverride)
 {
     busy = operationRunning = false;
     overlay.hide();
 
     // Octets réellement traités, d'après les chemins ayant réussi
-    juce::int64 bytes = 0;
-    std::unordered_set<std::string> succeeded;
+    juce::int64 bytes = bytesOverride;
 
-    for (const auto& p : report.succeededPaths)
-        succeeded.insert (p.toStdString());
+    if (bytes < 0)
+    {
+        bytes = 0;
+        std::unordered_set<std::string> succeeded;
 
-    for (const auto& b : library.data().bundles)
-        if (! b.isSymlink && succeeded.count (b.file.getFullPathName().toStdString()) != 0)
-            bytes += b.sizeBytes;
+        for (const auto& p : report.succeededPaths)
+            succeeded.insert (p.toStdString());
+
+        for (const auto& b : library.data().bundles)
+            if (! b.isSymlink && succeeded.count (b.file.getFullPathName().toStdString()) != 0)
+                bytes += b.sizeBytes;
+    }
 
     juce::String message;
     message << report.succeeded << fr (" sur ") << report.requested << fr (" élément(s) traité(s).");
@@ -1650,6 +1668,253 @@ void MainComponent::operationFinished (Operation op, const OperationReport& repo
                                   nullptr);
 
     startScan();
+}
+
+//==============================================================================
+//  Deep Clean
+//==============================================================================
+void MainComponent::startDeepClean (std::vector<int> targets, int hiddenCount)
+{
+    if (busy)
+        return;
+
+    const auto& data = library.data();
+    std::set<int> targetSet (targets.begin(), targets.end());
+    std::map<int, std::vector<int>> byEntry;
+
+    for (int bi : targets)
+        byEntry[data.bundles[(size_t) bi].entryIndex].push_back (bi);
+
+    auto groups = std::make_shared<std::vector<CleanGroup>>();
+    std::vector<LeftoverQuery> queries;
+    std::vector<size_t> queryGroup;
+    std::vector<juce::File> allDeleted;
+    int partialPlugins = 0;
+
+    for (const auto& [entryIndex, bundleList] : byEntry)
+    {
+        const auto& entry = data.entries[(size_t) entryIndex];
+
+        CleanGroup group;
+        group.title  = entry.name;
+        group.vendor = entry.vendor;
+
+        for (int bi : bundleList)
+        {
+            const auto& b = data.bundles[(size_t) bi];
+
+            CleanCandidate c;
+            c.file          = b.file;
+            c.badge         = formatLabel (b.format) + (b.disabled ? fr (" · OFF") : juce::String());
+            c.badgeColour   = Theme::formatColour (b.format);
+            c.sizeBytes     = b.isSymlink ? 0 : b.sizeBytes;
+            c.isBundle      = true;
+            c.isAudioUnit   = b.format == PluginFormat::AU;
+            c.requiresAdmin = UninstallerMac::requiresAdministrator (b.file);
+            c.detail        = scopeLabel (b.scope);
+            group.items.push_back (c);
+            allDeleted.push_back (b.file);
+        }
+
+        // Règle n°2 : résidus seulement si TOUS les bundles installés du plugin sont cochés
+        juce::StringArray missing;
+
+        for (auto f : kAllFormats)
+            for (int bi : entry.bundles[(size_t) f])
+                if (targetSet.count (bi) == 0)
+                    missing.addIfNotAlreadyThere (formatLabel (f));
+
+        group.leftoversEligible = missing.isEmpty();
+
+        if (group.leftoversEligible)
+        {
+            LeftoverQuery q;
+            q.pluginName = entry.name;
+            q.vendorName = entry.unknownVendor ? juce::String() : entry.vendor;
+
+            for (const auto& list : entry.bundles)
+            {
+                for (int bi : list)
+                {
+                    const auto& b = data.bundles[(size_t) bi];
+                    q.bundles.push_back (b.file);
+
+                    if (b.bundleId.isNotEmpty())
+                        q.bundleIds.addIfNotAlreadyThere (b.bundleId);
+                }
+            }
+
+            queries.push_back (std::move (q));
+            queryGroup.push_back (groups->size());
+        }
+        else
+        {
+            group.note = fr ("Fichiers résiduels non recherchés : ") + missing.joinIntoString (" + ")
+                       + fr (" reste(nt) installé(s). Cochez tous les formats pour un nettoyage complet.");
+            ++partialPlugins;
+        }
+
+        groups->push_back (std::move (group));
+    }
+
+    juce::StringArray warnings;
+
+    if (hiddenCount > 0)
+        warnings.add (countLabel (hiddenCount, "élément sélectionné est masqué par les filtres",
+                                  "éléments sélectionnés sont masqués par les filtres"));
+
+    if (partialPlugins > 0)
+        warnings.add (countLabel (partialPlugins, "plugin n'a pas tous ses formats cochés : résidus conservés",
+                                  "plugins n'ont pas tous leurs formats cochés : résidus conservés"));
+
+    const auto warning = warnings.joinIntoString (fr ("  ·  "));
+    const bool searched = ! queries.empty();
+
+    joinWorker();
+    busy = true;
+    cancelScan = false;
+    updateButtons();
+    overlay.show (fr ("Recherche des fichiers résiduels…"), nullptr);
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    worker = std::thread ([this, safe, groups, queries = std::move (queries), queryGroup = std::move (queryGroup),
+                           allDeleted = std::move (allDeleted), warning, searched]
+    {
+        const auto results = LeftoverScanner::scan (queries, allDeleted, &cancelScan);
+
+        for (size_t qi = 0; qi < results.size() && qi < queryGroup.size(); ++qi)
+        {
+            auto& group = (*groups)[queryGroup[qi]];
+
+            for (const auto& leftover : results[qi])
+            {
+                CleanCandidate c;
+                c.file           = leftover.file;
+                c.badge          = leftoverCategoryLabel (leftover.category);
+                c.badgeColour    = leftover.category == LeftoverCategory::Receipt     ? Theme::textDim
+                                 : leftover.category == LeftoverCategory::Preferences ? Theme::blue
+                                 : leftover.category == LeftoverCategory::Caches
+                                       || leftover.category == LeftoverCategory::Logs ? Theme::success
+                                 : leftover.isUserContent                             ? Theme::warning
+                                                                                      : Theme::violet;
+                c.sizeBytes      = leftover.sizeBytes;
+                c.isBundle       = false;
+                c.requiresAdmin  = leftover.requiresAdmin;
+                c.pruneIfEmpty   = leftover.pruneIfEmpty;
+                c.vendorKey      = leftover.vendorKey;
+                c.detail         = leftover.detail;
+                c.defaultChecked = ! leftover.isUserContent;
+                group.items.push_back (std::move (c));
+            }
+        }
+
+        juce::MessageManager::callAsync ([safe, groups, warning, searched]
+        {
+            if (auto* self = safe.getComponent())
+            {
+                self->busy = false;
+                self->overlay.hide();
+                self->updateButtons();
+
+                if (! self->cancelScan.load())
+                    self->showDeepClean (std::move (*groups), warning, searched);
+            }
+        });
+    });
+}
+
+void MainComponent::showDeepClean (std::vector<CleanGroup> groups, const juce::String& warning, bool leftoversSearched)
+{
+    deepCleanDialog = std::make_unique<DeepCleanDialog> (std::move (groups), warning, leftoversSearched);
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    deepCleanDialog->onCancel = [safe]
+    {
+        if (auto* self = safe.getComponent())
+            self->closeDeepClean();
+    };
+
+    deepCleanDialog->onConfirm = [safe] (std::vector<CleanCandidate> items)
+    {
+        if (auto* self = safe.getComponent())
+        {
+            self->closeDeepClean();
+            self->runTrash (std::move (items));
+        }
+    };
+
+    addAndMakeVisible (*deepCleanDialog);
+    deepCleanDialog->setBounds (getLocalBounds());
+    deepCleanDialog->toFront (true);
+    deepCleanDialog->grabKeyboardFocus();
+}
+
+void MainComponent::closeDeepClean()
+{
+    if (deepCleanDialog == nullptr)
+        return;
+
+    // Destruction différée : on est peut-être dans le onClick d'un de ses boutons
+    deepCleanDialog->setVisible (false);
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    juce::MessageManager::callAsync ([safe, dialog = deepCleanDialog.release()]
+    {
+        std::unique_ptr<DeepCleanDialog> owned (dialog);
+
+        if (auto* self = safe.getComponent())
+            self->removeChildComponent (owned.get());
+    });
+
+    grabKeyboardFocus();
+}
+
+void MainComponent::runTrash (std::vector<CleanCandidate> candidates)
+{
+    if (busy || candidates.empty())
+        return;
+
+    std::vector<TrashItem> items;
+    std::map<juce::String, juce::int64> sizes;
+    bool touchesAudioUnits = false;
+
+    for (const auto& c : candidates)
+    {
+        items.push_back ({ c.file, c.isBundle, c.pruneIfEmpty, c.vendorKey });
+        sizes[c.file.getFullPathName()] = c.sizeBytes;
+        touchesAudioUnits = touchesAudioUnits || c.isAudioUnit;
+    }
+
+    joinWorker();
+    busy = operationRunning = true;
+    updateButtons();
+    overlay.show (fr ("Envoi à la Corbeille…"), nullptr);
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    auto roots = PluginScanner::allowedRoots();
+
+    worker = std::thread ([safe, items = std::move (items), sizes = std::move (sizes),
+                           roots = std::move (roots), touchesAudioUnits]
+    {
+        const auto report = UninstallerMac::moveItemsToTrash (items, roots);
+
+        if (touchesAudioUnits && report.succeeded > 0)
+            UninstallerMac::refreshAudioUnitRegistrar();
+
+        juce::int64 bytes = 0;
+
+        for (const auto& path : report.succeededPaths)
+            if (const auto it = sizes.find (path); it != sizes.end())
+                bytes += it->second;
+
+        juce::MessageManager::callAsync ([safe, report, bytes]
+        {
+            if (auto* self = safe.getComponent())
+                self->operationFinished (Operation::Uninstall, report, bytes);
+        });
+    });
 }
 
 } // namespace aura
