@@ -51,12 +51,12 @@ namespace Theme
     }
 
     /** Majuscules françaises fiables : toUpperCase() dépend de la locale C et laisse « é » en minuscule. */
-    inline juce::String upper (const juce::String& text)
+    inline juce::String upper (const juce::String& source)
     {
         juce::String out;
-        out.preallocateBytes ((size_t) text.getNumBytesAsUTF8() + 1);
+        out.preallocateBytes ((size_t) source.getNumBytesAsUTF8() + 1);
 
-        for (auto p = text.getCharPointer(); ! p.isEmpty();)
+        for (auto p = source.getCharPointer(); ! p.isEmpty();)
         {
             auto c = p.getAndAdvance();
 
