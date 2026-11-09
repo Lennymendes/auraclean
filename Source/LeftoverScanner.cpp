@@ -170,7 +170,8 @@ namespace
         juce::String                     vendorKey;
         juce::File                       home;
 
-        void add (const juce::File& file, LeftoverCategory category, const juce::File& prune, const juce::String& detail)
+        void add (const juce::File& file, LeftoverCategory category, const juce::Array<juce::File>& prune,
+                  const juce::String& detail)
         {
             if (LeftoverScanner::isProtectedPath (file) || isPluginBundleName (file.getFileName()))
                 return;
@@ -208,7 +209,33 @@ namespace
         return out;
     }
 
-    /** Recherche par nom : <Root>/<Plugin>, <Root>/<bundle id>*, <Root>/<Vendor>/<Plugin>. */
+    /** Dans un dossier <Vendor> : <Vendor>/<Plugin> et <Vendor>/<Presets|Settings|Data…>/<Plugin>. */
+    void searchVendorFolder (const juce::File& vendorFolder, LeftoverCategory category, const Matcher& m, Collector& out)
+    {
+        if (! vendorFolder.isDirectory() || vendorFolder.isSymbolicLink())
+            return;
+
+        const auto byName = juce::String::fromUTF8 ("nom du plugin");
+
+        for (const auto& sub : childrenOf (vendorFolder))
+        {
+            const auto subName = sub.getFileName();
+
+            if (m.matches (subName))
+            {
+                out.add (sub, category, { vendorFolder }, byName);
+                continue;
+            }
+
+            // Profondeur 2 : ~/Documents/FabFilter/Presets/Pro-Q 3
+            if (LeftoverScanner::isIntermediateFolderName (subName) && sub.isDirectory() && ! sub.isSymbolicLink())
+                for (const auto& leaf : childrenOf (sub))
+                    if (m.matches (leaf.getFileName()))
+                        out.add (leaf, category, { sub, vendorFolder }, byName);
+        }
+    }
+
+    /** Recherche par nom : <Root>/<Plugin>, <Root>/<bundle id>*, <Root>/<Vendor>/[<SubDir>/]<Plugin>. */
     void searchByName (const LeftoverScanner::SearchRoot& root, const Matcher& m, Collector& out)
     {
         for (const auto& child : childrenOf (root.folder))
@@ -217,16 +244,12 @@ namespace
 
             if (m.isVendorFolderName (name))
             {
-                // Règle anti-collision : on ne descend que pour cibler <Vendor>/<Plugin>
-                if (child.isDirectory() && ! child.isSymbolicLink())
-                    for (const auto& sub : childrenOf (child))
-                        if (m.matches (sub.getFileName()))
-                            out.add (sub, root.category, child, juce::String::fromUTF8 ("nom du plugin"));
-
+                // Règle anti-collision : on ne descend que pour cibler <Vendor>/…/<Plugin>
+                searchVendorFolder (child, root.category, m, out);
                 continue;
             }
 
-            if (LeftoverScanner::isSharedFolderName (name))
+            if (root.vendorOnly || LeftoverScanner::isSharedFolderName (name))
                 continue;
 
             if (m.matches (name))
@@ -466,8 +489,12 @@ namespace
                         if (comps.isEmpty() || LeftoverScanner::isSharedFolderName (comps[0]))
                             break;
 
+                        if (root.vendorOnly && ! m.isVendorFolderName (comps[0]))
+                            break;
+
                         const auto level1 = root.folder.getChildFile (comps[0]);
-                        juce::File candidate, prune;
+                        juce::File candidate;
+                        juce::Array<juce::File> prune;
                         bool ownershipAllowed = true;
 
                         if (m.isVendorFolderName (comps[0]))
@@ -476,8 +503,18 @@ namespace
                             if (comps.size() < 2)
                                 break;
 
-                            candidate = level1.getChildFile (comps[1]);
-                            prune     = level1;
+                            if (comps.size() >= 3 && LeftoverScanner::isIntermediateFolderName (comps[1]))
+                            {
+                                // <Vendor>/Presets/<Plugin>
+                                const auto intermediate = level1.getChildFile (comps[1]);
+                                candidate = intermediate.getChildFile (comps[2]);
+                                prune     = { intermediate, level1 };
+                            }
+                            else
+                            {
+                                candidate = level1.getChildFile (comps[1]);
+                                prune     = { level1 };
+                            }
                         }
                         else if (comps.size() >= 2 && ! m.matches (comps[0]) && ! isOwned (level1))
                         {
@@ -564,12 +601,24 @@ std::vector<LeftoverScanner::SearchRoot> LeftoverScanner::searchRoots()
     roots.push_back ({ juce::File ("/Users/Shared"),                                  LeftoverCategory::Shared,         false });
     roots.push_back ({ home.getChildFile ("Documents/VST3 Presets"),                  LeftoverCategory::UserPresets,    true });
     roots.push_back ({ home.getChildFile ("Music/Audio Music Apps/Plug-In Settings"), LeftoverCategory::PluginSettings, true });
+
+    // Dossiers de marque créés directement dans Documents / Musique (FabFilter, iZotope, NI, Xfer…).
+    // Placés APRÈS les racines plus précises ci-dessus : la première racine correspondante gagne.
+    roots.push_back ({ home.getChildFile ("Documents"), LeftoverCategory::Presets, true, true });
+    roots.push_back ({ home.getChildFile ("Music"),     LeftoverCategory::Presets, true, true });
     return roots;
 }
 
 juce::File LeftoverScanner::receiptsFolder()
 {
     return juce::File ("/var/db/receipts");
+}
+
+bool LeftoverScanner::isIntermediateFolderName (const juce::String& name)
+{
+    static const std::set<juce::String> intermediates { "presets", "userpresets", "pluginsettings", "settings", "data",
+                                                         "factorypresets", "userdata" };
+    return intermediates.count (key (name)) != 0;
 }
 
 bool LeftoverScanner::isSharedFolderName (const juce::String& name)

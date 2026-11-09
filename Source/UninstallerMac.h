@@ -45,7 +45,8 @@ struct TrashItem
 {
     juce::File   file;
     bool         isPluginBundle = true;
-    juce::File   pruneIfEmpty;  // dossier <Vendor> à supprimer s'il ne reste que .DS_Store
+    juce::Array<juce::File> pruneIfEmpty;  // dossiers parents (du plus profond au plus haut) à retirer s'ils
+                                           // ne contiennent plus que .DS_Store : <Vendor>/Presets puis <Vendor>
     juce::String vendorKey;     // garde-fou : refuse <Racine>/<Vendor> lui-même
 };
 

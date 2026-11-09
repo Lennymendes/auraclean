@@ -406,6 +406,13 @@ bool UninstallerMac::isSafeLeftoverPath (const juce::File& file, const juce::Str
 
         if (parentReal == rootReal)
         {
+            // ~/Documents, ~/Music : rien n'est accepté au premier niveau, seulement sous <Vendor>/
+            if (root.vendorOnly)
+            {
+                reason = txt ("élément directement dans ") + root.folder.getFileName() + txt (" : refusé");
+                return false;
+            }
+
             inside = topLevel = true;
             break;
         }
@@ -434,6 +441,19 @@ bool UninstallerMac::isSafeLeftoverPath (const juce::File& file, const juce::Str
 namespace
 {
     /** Le dossier <Vendor> doit être exactement au premier niveau d'une racine de résidus. */
+    bool isSearchRoot (const juce::String& realPath)
+    {
+        if (realPath.isEmpty())
+            return false;
+
+        for (const auto& root : LeftoverScanner::searchRoots())
+            if (realPath == resolvedPath (root.folder.getFullPathName()))
+                return true;
+
+        return false;
+    }
+
+    /** Élagable : <Racine>/<Vendor>, ou <Racine>/<Vendor>/<Presets|Settings|Data…> — rien d'autre. */
     bool isSafePruneFolder (const juce::File& folder)
     {
         if (folder == juce::File() || ! folder.isDirectory() || folder.isSymbolicLink())
@@ -441,16 +461,19 @@ namespace
 
         const auto name = folder.getFileName();
 
-        if (name.isEmpty() || LeftoverScanner::isSharedFolderName (name))
+        if (name.isEmpty() || name.startsWithChar ('.'))
             return false;
 
-        const auto parentReal = resolvedPath (folder.getParentDirectory().getFullPathName());
+        const auto parent = folder.getParentDirectory();
 
-        for (const auto& root : LeftoverScanner::searchRoots())
-            if (parentReal.isNotEmpty() && parentReal == resolvedPath (root.folder.getFullPathName()))
-                return true;
+        // Niveau 1 : le dossier de marque
+        if (! LeftoverScanner::isSharedFolderName (name) && isSearchRoot (resolvedPath (parent.getFullPathName())))
+            return true;
 
-        return false;
+        // Niveau 2 : sous-dossier intermédiaire d'un dossier de marque
+        return LeftoverScanner::isIntermediateFolderName (name)
+            && ! LeftoverScanner::isSharedFolderName (parent.getFileName())
+            && isSearchRoot (resolvedPath (parent.getParentDirectory().getFullPathName()));
     }
 
     /** Vide ou ne contient que des .DS_Store. */
@@ -461,6 +484,31 @@ namespace
                 return false;
 
         return true;
+    }
+
+    /** Vide une fois élagués les sous-dossiers qui sont eux-mêmes dans la liste d'élagage. */
+    bool willBeEmptyAfterPruning (const juce::File& folder, const std::vector<juce::File>& pruneSet)
+    {
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories))
+        {
+            const auto child = entry.getFile();
+
+            if (child.getFileName() == ".DS_Store")
+                continue;
+
+            const bool prunable = entry.isDirectory()
+                               && std::find (pruneSet.begin(), pruneSet.end(), child) != pruneSet.end()
+                               && willBeEmptyAfterPruning (child, pruneSet);
+            if (! prunable)
+                return false;
+        }
+
+        return true;
+    }
+
+    int pathDepth (const juce::File& f)
+    {
+        return f.getFullPathName().retainCharacters ("/").length();
     }
 
     /** Version utilisateur : supprime .DS_Store puis rmdir. */
@@ -493,9 +541,13 @@ OperationReport UninstallerMac::moveItemsToTrash (const std::vector<TrashItem>& 
     std::vector<juce::File> pruneCandidates;
 
     for (const auto& item : items)
-        if (item.pruneIfEmpty != juce::File()
-            && std::find (pruneCandidates.begin(), pruneCandidates.end(), item.pruneIfEmpty) == pruneCandidates.end())
-            pruneCandidates.push_back (item.pruneIfEmpty);
+        for (const auto& folder : item.pruneIfEmpty)
+            if (folder != juce::File() && std::find (pruneCandidates.begin(), pruneCandidates.end(), folder) == pruneCandidates.end())
+                pruneCandidates.push_back (folder);
+
+    // Le plus profond d'abord : <Vendor>/Presets avant <Vendor>
+    std::stable_sort (pruneCandidates.begin(), pruneCandidates.end(),
+                      [] (const juce::File& a, const juce::File& b) { return pathDepth (a) > pathDepth (b); });
 
     //---------------------------------------------------- 1. sans privilèges
     for (const auto& item : items)
@@ -546,7 +598,7 @@ OperationReport UninstallerMac::moveItemsToTrash (const std::vector<TrashItem>& 
         if (! isSafePruneFolder (folder) || canWrite (folder.getParentDirectory()))
             continue;
 
-        if (! privileged.empty() || isEffectivelyEmpty (folder))
+        if (! privileged.empty() || willBeEmptyAfterPruning (folder, pruneCandidates))
             privilegedPrunes.push_back (folder);
     }
 

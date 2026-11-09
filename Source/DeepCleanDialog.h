@@ -31,7 +31,7 @@ struct CleanCandidate
     bool         isBundle  = false;
     bool         isAudioUnit   = false;
     bool         requiresAdmin = false;
-    juce::File   pruneIfEmpty;
+    juce::Array<juce::File> pruneIfEmpty;
     juce::String vendorKey;
     juce::String detail;
 };

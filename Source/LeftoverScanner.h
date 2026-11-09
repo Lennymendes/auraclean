@@ -14,6 +14,7 @@
 //    - jamais une racine de recherche, un ancêtre de racine, un dossier de
 //      plugins, ni un élément « com.apple.* » ou un nom partagé connu (Avid,
 //      PACE, iLok, Steinberg…) ;
+//    - dans ~/Documents et ~/Music : uniquement sous un dossier <Vendor> ;
 //    - un dossier déduit d'un .bom n'est retenu que si son nom correspond au
 //      plugin OU si TOUS les fichiers qu'il contient proviennent de ce .bom ;
 //    - un reçu n'est retenu que s'il référence un bundle supprimé, et aucun
@@ -61,7 +62,8 @@ struct LeftoverItem
     bool             isDirectory   = false;
     bool             requiresAdmin = false;
     bool             isUserContent = false;  // presets utilisateur : décochés par défaut
-    juce::File       pruneIfEmpty;           // dossier <Vendor> à retirer s'il devient vide
+    juce::Array<juce::File> pruneIfEmpty;    // dossiers parents à retirer s'ils deviennent vides,
+                                             // du plus profond au plus haut : <Vendor>/Presets puis <Vendor>
     juce::String     vendorKey;              // clé normalisée de la marque (garde-fou)
     juce::String     detail;                 // origine : « nom », « reçu com.x.pkg »…
 };
@@ -74,6 +76,7 @@ public:
         juce::File       folder;
         LeftoverCategory category;
         bool             userDomain;
+        bool             vendorOnly = false;  // ~/Documents, ~/Music : seulement <Vendor>/…, jamais le 1er niveau
     };
 
     static std::vector<SearchRoot> searchRoots();
@@ -90,6 +93,9 @@ public:
 
     /** Nom partagé à ne jamais supprimer au premier niveau d'une racine (Avid, PACE, iLok…). */
     static bool isSharedFolderName (const juce::String& name);
+
+    /** Sous-dossier intermédiaire classique d'un dossier de marque : Presets, User Presets, Settings… */
+    static bool isIntermediateFolderName (const juce::String& name);
 
     /** Taille occupée sur disque (blocs alloués), récursive, sans suivre les liens. */
     static juce::int64 diskSize (const juce::File&);

@@ -50,17 +50,20 @@ AuraClean/
 « Désinstaller » ouvre une modale listant, par plugin, les bundles ET les fichiers résiduels :
 `Application Support`, `Audio/Presets`, `Preferences` (+ `ByHost`), `Caches`, `Logs` (dans `/Library` et
 `~/Library`), `/Users/Shared`, `~/Documents/VST3 Presets`, `~/Music/Audio Music Apps/Plug-In Settings`,
-et les reçus `/var/db/receipts/*.bom|.plist` (contenu lu via `lsbom -fls`).
+`~/Documents/<Vendor>` et `~/Music/<Vendor>` (FabFilter, iZotope, NI, Xfer…), et les reçus `/var/db/receipts/*.bom|.plist` (contenu lu via `lsbom -fls`).
 
 Règles de sécurité :
 - **Formats complets** : les résidus ne sont recherchés (et cochables) que si **tous** les formats installés du
   plugin sont cochés. Décocher un bundle dans la modale verrouille ses résidus.
-- **Anti-collision marque** : jamais `<Racine>/<Vendor>`, uniquement `<Vendor>/<Plugin>`. Le dossier `<Vendor>`
-  est supprimé ensuite **seulement** s'il est vide (ou ne contient que `.DS_Store`). Revérifié dans `UninstallerMac.mm`.
+- **Anti-collision marque** : jamais `<Racine>/<Vendor>`, uniquement `<Vendor>/<Plugin>` ou
+  `<Vendor>/<Presets|User Presets|Plug-In Settings|Settings|Data>/<Plugin>`. Ensuite, le sous-dossier intermédiaire
+  puis `<Vendor>` sont supprimés **seulement** s'ils sont vides (ou ne contiennent que `.DS_Store`), du plus profond
+  au plus haut. Revérifié dans `UninstallerMac.mm`.
+- `~/Documents` et `~/Music` : **uniquement** sous un dossier `<Vendor>`, jamais au premier niveau (badge PRESETS).
 - **Reçus .pkg** : retenus uniquement s'ils référencent un bundle supprimé et aucun plugin encore installé.
   Un dossier déduit du `.bom` n'est retenu que si son nom correspond au plugin ou si **tous** ses fichiers
   proviennent de ce `.bom` ; les noms génériques (`Shared`, `Presets`…) et partagés (Avid, PACE, iLok…) sont exclus.
-- Presets utilisateur (`~/Documents/VST3 Presets`, réglages Logic, `~/Library/Audio/Presets`) : **décochés par défaut**.
+- Presets utilisateur (`~/Documents/…`, `~/Music/…`, réglages Logic, `~/Library/Audio/Presets`) : **décochés par défaut**.
 - Bundles + résidus + élagage des dossiers `<Vendor>` vides passent dans **un seul** lot administrateur.
 
 ## Télécharger l'app (GitHub Actions)
