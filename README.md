@@ -92,7 +92,27 @@ cmake --build build --config Release
 Signature : Hardened Runtime + `com.apple.security.automation.apple-events`. App **non sandboxée**
 (obligatoire pour écrire dans `/Library/Audio/Plug-Ins`). Distribution hors App Store, notarisation Developer ID.
 
+## Ergonomie
+
+- **Intro** (~600 ms, 60 FPS) au lancement et à chaque « Rescanner » : titre *Aura Clean* + barre fine
+  cyan → violet, puis la liste apparaît en fondu décalé ligne par ligne. Rescan silencieux après une opération.
+- **Modale de désinstallation** : overlay `#D007080B` sur l'interface (fondu 150 ms entrée / 120 ms sortie),
+  carte `#11131A`, bordure `#252836`, ombre portée.
+- **Tailles** : une seule fonction `formatBytes` (base 1024) — `512 o`, `763,3 Ko`, `508,0 Mo`, `1,54 Go`.
+- **Colonne Taille** : binaires + ligne « + X données » (presets / données détectés en arrière-plan, hors
+  `~/Documents` et reçus .pkg pour ne déclencher aucune autorisation macOS au lancement) ; détail en infobulle.
+- **Infobulle par badge** `[VST3]` `[AU]` `[AAX]` : chemin exact, taille, version, architecture, Bundle ID.
+- **Clic droit** : afficher chaque format dans le Finder, copier le Bundle ID, copier les chemins,
+  cocher / décocher, « Désinstaller ce plugin… ».
+
 ## Raccourcis
 
-⌘F recherche · ⌘R rescanner · ⌘A tout cocher · Entrée coche les lignes sélectionnées ·
-double-clic = Finder · clic droit (ligne ou marque) = menu contextuel.
+| Raccourci | Action |
+|---|---|
+| ⌘F | Rechercher |
+| ⌘A | Tout cocher (éléments visibles) |
+| Échap | Tout décocher · fermer la modale · vider la recherche |
+| ⌘R | Rescanner |
+| ⌫ / Suppr | Ouvrir la modale de désinstallation de la sélection |
+| Entrée | Cocher les lignes sélectionnées (modale : confirmer) |
+| Double-clic | Afficher dans le Finder |

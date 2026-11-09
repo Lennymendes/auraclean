@@ -45,10 +45,15 @@ struct CleanGroup
 };
 
 class DeepCleanDialog : public juce::Component,
-                        private juce::ListBoxModel
+                        private juce::ListBoxModel,
+                        private juce::Timer
 {
 public:
     DeepCleanDialog (std::vector<CleanGroup> groups, juce::String warning, bool leftoversSearched);
+    ~DeepCleanDialog() override;
+
+    /** Fondu de sortie (120 ms) puis appel de onDone. Les clics sont ignorés pendant l'animation. */
+    void dismiss (std::function<void()> onDone);
 
     /** Reçoit uniquement les éléments cochés (et actifs). */
     std::function<void (std::vector<CleanCandidate>)> onConfirm;
@@ -71,6 +76,8 @@ private:
     void listBoxItemClicked (int row, const juce::MouseEvent&) override;
     juce::String getTooltipForRow (int row) override;
 
+    void timerCallback() override;
+
     void rebuildRows();
     void enforceRules (CleanGroup&);
     void toggleGroup (int group);
@@ -86,6 +93,10 @@ private:
 
     juce::ListBox    list;
     juce::TextButton cancelButton, confirmButton, expandButton;
+
+    double                animationStartMs = 0.0;
+    bool                  dismissing = false;
+    std::function<void()> dismissDone;
 
     juce::int64 totalBytes = 0, leftoverBytes = 0;
     int         checkedCount = 0, leftoverCount = 0;

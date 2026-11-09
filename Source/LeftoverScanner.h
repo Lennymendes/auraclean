@@ -68,6 +68,12 @@ struct LeftoverItem
     juce::String     detail;                 // origine : « nom », « reçu com.x.pkg »…
 };
 
+struct LeftoverScanOptions
+{
+    bool includeReceipts  = true;  // lsbom sur /var/db/receipts
+    bool includeDocuments = true;  // ~/Documents : déclenche l'autorisation macOS (TCC) au 1er accès
+};
+
 class LeftoverScanner
 {
 public:
@@ -79,6 +85,8 @@ public:
         bool             vendorOnly = false;  // ~/Documents, ~/Music : seulement <Vendor>/…, jamais le 1er niveau
     };
 
+    using Options = LeftoverScanOptions;
+
     static std::vector<SearchRoot> searchRoots();
     static juce::File receiptsFolder();
 
@@ -86,7 +94,8 @@ public:
         @param allDeletedBundles  tous les bundles supprimés dans ce lot (suites multi-plugins). */
     static std::vector<std::vector<LeftoverItem>> scan (const std::vector<LeftoverQuery>& queries,
                                                         const std::vector<juce::File>& allDeletedBundles,
-                                                        const std::atomic<bool>* shouldCancel = nullptr);
+                                                        const std::atomic<bool>* shouldCancel = nullptr,
+                                                        Options options = {});
 
     /** Racines, ancêtres de racines, dossiers de plugins, com.apple.*, noms partagés connus. */
     static bool isProtectedPath (const juce::File&);

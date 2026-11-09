@@ -61,6 +61,26 @@ struct SelectionSummary
 };
 
 //==============================================================================
+/** Liste (ou table) qui propose d'abord les raccourcis globaux à l'application :
+    sans cela, ListBox consomme ⌘A et Suppr avant qu'ils n'atteignent MainComponent. */
+template <typename ListType>
+class ShortcutForwarding : public ListType
+{
+public:
+    using ListType::ListType;
+
+    std::function<bool (const juce::KeyPress&)> onShortcut;
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (onShortcut != nullptr && onShortcut (key))
+            return true;
+
+        return ListType::keyPressed (key);
+    }
+};
+
+//==============================================================================
 /** Modèle : résultat du scan + filtres + sélection (par bundle). Message thread uniquement. */
 class Library
 {
@@ -93,6 +113,10 @@ public:
     SelectionSummary summary() const;
     std::vector<int> selectedBundles() const;
 
+    /** Presets / données détectés par entrée (estimation en arrière-plan) ; -1 = pas encore connu. */
+    void        setLeftoverEstimates (std::vector<juce::int64> bytesPerEntry);
+    juce::int64 leftoverEstimate (int entryIndex) const noexcept;
+
 private:
     bool computeEntryVisible (int entryIndex) const;
     void sortRows();
@@ -102,6 +126,7 @@ private:
     std::vector<uint8_t> entryVisible;   // 1 octet par entrée
     std::vector<int>     visibleRows;    // indices d'entrées, triés
     juce::StringArray    searchTokens;
+    std::vector<juce::int64> leftoverBytes;
     int                  sortColumn  = colVendor;
     bool                 sortForward = true;
 };
@@ -118,6 +143,7 @@ public:
 
     std::function<void()> onFilterChanged;
     std::function<void()> onSelectionChanged;
+    std::function<bool (const juce::KeyPress&)> onShortcut;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -130,8 +156,8 @@ private:
 
     juce::String keyForRow (int row) const;
 
-    Library&     library;
-    juce::ListBox list;
+    Library&                          library;
+    ShortcutForwarding<juce::ListBox> list;
     juce::String stats;
     bool         ignoreSelectionCallback = false;
 
@@ -140,13 +166,22 @@ private:
 
 //==============================================================================
 class PluginTable : public juce::Component,
-                    private juce::TableListBoxModel
+                    private juce::TableListBoxModel,
+                    private juce::Timer
 {
 public:
     explicit PluginTable (Library&);
 
     void refresh();
-    std::function<void()> onSelectionChanged;
+
+    /** Apparition progressive des lignes (fondu décalé de haut en bas). */
+    void startReveal();
+
+    std::function<void()>                       onSelectionChanged;
+    std::function<void (int entryIndex)>        onUninstallEntry;
+    std::function<bool (const juce::KeyPress&)> onShortcut;
+
+    void deselectAllRows() { table.deselectAllRows(); }
 
     void resized() override;
     void paintOverChildren (juce::Graphics&) override;
@@ -161,12 +196,20 @@ private:
     void returnKeyPressed (int lastRowSelected) override;
     juce::String getCellTooltip (int row, int columnId) override;
 
+    void timerCallback() override;
+
     int  entryForRow (int row) const noexcept;
     void showContextMenu (int entryIndex);
     void notifyChanged();
+    float rowRevealAlpha (int row) const noexcept;
 
-    Library&          library;
-    juce::TableListBox table;
+    juce::String formatTooltip (int entryIndex, PluginFormat) const;
+    juce::String sizeTooltip (int entryIndex) const;
+
+    Library&                               library;
+    ShortcutForwarding<juce::TableListBox> table;
+    double                                 revealStartMs = 0.0;
+    bool                                   revealing     = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginTable)
 };
@@ -193,6 +236,35 @@ private:
 };
 
 //==============================================================================
+/** Animation d'introduction (~600 ms, 60 FPS) au lancement et à chaque « Rescanner » :
+    titre « Aura Clean » + barre de chargement fine, puis fondu de sortie qui révèle la liste. */
+class IntroOverlay : public juce::Component,
+                     private juce::Timer
+{
+public:
+    IntroOverlay();
+
+    void start (const std::atomic<float>* scanProgress);
+    void finish();  // les données sont prêtes : termine la barre puis s'efface
+    bool isActive() const noexcept { return isVisible(); }
+
+    std::function<void()> onRevealStart;  // début du fondu de sortie
+    std::function<void()> onHidden;
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override {}
+
+private:
+    void timerCallback() override;
+
+    const std::atomic<float>* progress = nullptr;
+    double startMs = 0.0, lastTickMs = 0.0, fadeStartMs = 0.0;
+    float  shown   = 0.0f;   // valeur affichée (lissée) de la barre
+    float  opacity = 1.0f;
+    bool   finished = false, fading = false;
+};
+
+//==============================================================================
 class MainComponent : public juce::Component
 {
 public:
@@ -209,8 +281,15 @@ public:
 private:
     enum class Operation { Uninstall, Disable, Enable };
 
-    void startScan();
+    void startScan (bool withIntro = true);
     void scanFinished (ScanResult result);
+    void introHidden();
+    bool handleShortcut (const juce::KeyPress&);
+    void uninstallEntry (int entryIndex);
+
+    // Estimation des presets / données par plugin (colonne Taille), hors ~/Documents
+    void startLeftoverEstimate();
+    void stopLeftoverEstimate();
     void filtersChanged();
     void selectionChanged();
     void updateButtons();
@@ -248,7 +327,9 @@ private:
     SelectionSummary summary;
 
     BusyOverlay                      overlay;
+    IntroOverlay                     intro;
     std::unique_ptr<DeepCleanDialog> deepCleanDialog;
+    std::unique_ptr<DeepCleanDialog> closingDialog;  // en cours de fondu de sortie
     juce::TooltipWindow tooltips { this, 450 };
 
     // Travail en arrière-plan (un seul job à la fois)
@@ -257,6 +338,10 @@ private:
     std::atomic<float> progress { 0.0f };
     bool               busy             = false;
     bool               operationRunning = false;
+
+    std::thread        estimateWorker;
+    std::atomic<bool>  cancelEstimate { false };
+    int                scanGeneration = 0;
 
     juce::Rectangle<int> headerArea, bulkArea, bottomArea, summaryArea;
 

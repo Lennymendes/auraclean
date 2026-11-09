@@ -50,6 +50,29 @@ namespace Theme
         return textFaint;
     }
 
+    /** Majuscules françaises fiables : toUpperCase() dépend de la locale C et laisse « é » en minuscule. */
+    inline juce::String upper (const juce::String& text)
+    {
+        juce::String out;
+        out.preallocateBytes ((size_t) text.getNumBytesAsUTF8() + 1);
+
+        for (auto p = text.getCharPointer(); ! p.isEmpty();)
+        {
+            auto c = p.getAndAdvance();
+
+            if (c >= 0xe0 && c <= 0xfe && c != 0xf7)  // à…þ (Latin-1) → À…Þ
+                c -= 0x20;
+            else if (c == 0x153)                     // œ → Œ
+                c = 0x152;
+            else
+                c = juce::CharacterFunctions::toUpperCase (c);
+
+            out += c;
+        }
+
+        return out;
+    }
+
     inline juce::Font font (float height, bool bold = false)
     {
         return juce::Font (juce::FontOptions (height, bold ? juce::Font::bold : juce::Font::plain));
@@ -265,7 +288,7 @@ public:
 
         g.setColour (sortedForward || sortedBackward ? Theme::text : Theme::textDim);
         g.setFont (Theme::font (12.0f, true));
-        g.drawFittedText (columnName.toUpperCase(), area, juce::Justification::centredLeft, 1);
+        g.drawFittedText (Theme::upper (columnName), area, juce::Justification::centredLeft, 1);
     }
 
     //==========================================================================

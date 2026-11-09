@@ -7,6 +7,7 @@
 #include "MainComponent.h"  // fr(), formatBytes()
 
 #include <algorithm>
+#include <cmath>
 
 namespace aura
 {
@@ -17,6 +18,17 @@ namespace
     constexpr int kFooterH     = 92;
     constexpr int kBadgeWidth  = 112;
     constexpr int kSizeWidth   = 92;
+
+    constexpr double kFadeInMs  = 150.0;
+    constexpr double kFadeOutMs = 120.0;
+
+    const juce::Colour kVeil        { 0xd007080b };
+    const juce::Colour kCard        { 0xff11131a };
+    const juce::Colour kCardBorder  { 0xff252836 };
+    const juce::Colour kGroupRow    { 0xff161922 };
+    const juce::Colour kRowDivider  { 0xff1d2029 };
+
+    float easeOutCubic (float t) { t = juce::jlimit (0.0f, 1.0f, t); return 1.0f - std::pow (1.0f - t, 3.0f); }
 
     enum class Tri { None, Partial, All };
 
@@ -107,7 +119,7 @@ DeepCleanDialog::DeepCleanDialog (std::vector<CleanGroup> g, juce::String warnin
     list.setModel (this);
     list.setRowHeight (kRowHeight);
     list.setOutlineThickness (0);
-    list.setColour (juce::ListBox::backgroundColourId, Theme::panel);
+    list.setColour (juce::ListBox::backgroundColourId, kCard);
     addAndMakeVisible (list);
 
     cancelButton.setButtonText (fr ("Annuler"));
@@ -146,6 +158,58 @@ DeepCleanDialog::DeepCleanDialog (std::vector<CleanGroup> g, juce::String warnin
 
     setWantsKeyboardFocus (true);
     rebuildRows();
+
+    // Fondu d'entrée : le voile et la carte apparaissent ensemble
+    setAlpha (0.0f);
+    animationStartMs = juce::Time::getMillisecondCounterHiRes();
+    startTimerHz (60);
+}
+
+DeepCleanDialog::~DeepCleanDialog()
+{
+    stopTimer();
+}
+
+void DeepCleanDialog::dismiss (std::function<void()> onDone)
+{
+    if (dismissing)
+        return;
+
+    dismissing  = true;
+    dismissDone = std::move (onDone);
+    setEnabled (false);
+    animationStartMs = juce::Time::getMillisecondCounterHiRes();
+    startTimerHz (60);
+}
+
+void DeepCleanDialog::timerCallback()
+{
+    const auto elapsed = juce::Time::getMillisecondCounterHiRes() - animationStartMs;
+
+    if (! dismissing)
+    {
+        const auto t = (float) (elapsed / kFadeInMs);
+        setAlpha (easeOutCubic (t));
+
+        if (t >= 1.0f)
+        {
+            setAlpha (1.0f);
+            stopTimer();
+        }
+        return;
+    }
+
+    const auto t = (float) (elapsed / kFadeOutMs);
+    setAlpha (1.0f - easeOutCubic (t));
+
+    if (t >= 1.0f)
+    {
+        stopTimer();
+        setVisible (false);
+
+        if (auto done = std::move (dismissDone))
+            done();
+    }
 }
 
 juce::String DeepCleanDialog::displayPath (const juce::File& f)
@@ -270,17 +334,21 @@ void DeepCleanDialog::resized()
 
 void DeepCleanDialog::paint (juce::Graphics& g)
 {
-    g.fillAll (Theme::background.withAlpha (0.82f));
+    // Voile sombre : l'interface principale reste visible derrière
+    g.fillAll (kVeil);
 
-    const auto card = cardBounds();
+    const auto card  = cardBounds();
     const auto cardF = card.toFloat();
 
-    g.setColour (juce::Colours::black.withAlpha (0.45f));
-    g.fillRoundedRectangle (cardF.translated (0.0f, 8.0f).expanded (6.0f), 20.0f);
-    g.setColour (Theme::background);
-    g.fillRoundedRectangle (cardF, 16.0f);
-    g.setColour (Theme::border);
-    g.drawRoundedRectangle (cardF.reduced (0.5f), 16.0f, 1.0f);
+    juce::Path cardShape;
+    cardShape.addRoundedRectangle (cardF, 14.0f);
+
+    juce::DropShadow (juce::Colours::black.withAlpha (0.55f), 48, { 0, 18 }).drawForPath (g, cardShape);
+
+    g.setColour (kCard);
+    g.fillPath (cardShape);
+    g.setColour (kCardBorder);
+    g.strokePath (cardShape, juce::PathStrokeType (1.0f));
 
     // ---- En-tête
     auto header = card.withHeight (kHeaderH).reduced (28, 20);
@@ -316,9 +384,9 @@ void DeepCleanDialog::paint (juce::Graphics& g)
                     header.removeFromTop (20), juce::Justification::centredLeft, true);
     }
 
-    g.setColour (Theme::border);
-    g.fillRect (card.getX(), card.getY() + kHeaderH - 1, card.getWidth(), 1);
-    g.fillRect (card.getX(), card.getBottom() - kFooterH, card.getWidth(), 1);
+    g.setColour (kCardBorder);
+    g.fillRect (card.getX() + 1, card.getY() + kHeaderH - 1, card.getWidth() - 2, 1);
+    g.fillRect (card.getX() + 1, card.getBottom() - kFooterH, card.getWidth() - 2, 1);
 
     // ---- Pied : total
     auto footer = card.withTrimmedTop (card.getHeight() - kFooterH).reduced (28, 18);
@@ -349,6 +417,9 @@ void DeepCleanDialog::paint (juce::Graphics& g)
 
 bool DeepCleanDialog::keyPressed (const juce::KeyPress& key)
 {
+    if (dismissing)
+        return true;
+
     if (key == juce::KeyPress::escapeKey)
     {
         if (onCancel)
@@ -383,9 +454,9 @@ void DeepCleanDialog::paintListBoxItem (int row, juce::Graphics& g, int width, i
     if (ref.item < 0)
     {
         // ---------------------------------------------- en-tête de plugin
-        g.setColour (Theme::panelAlt);
+        g.setColour (kGroupRow);
         g.fillRect (area);
-        g.setColour (Theme::border.withAlpha (0.6f));
+        g.setColour (kRowDivider);
         g.fillRect (0, height - 1, width, 1);
 
         drawChevron (g, juce::Rectangle<float> (12.0f, 0.0f, 18.0f, (float) height), group.expanded);
@@ -434,13 +505,13 @@ void DeepCleanDialog::paintListBoxItem (int row, juce::Graphics& g, int width, i
     const auto& item  = group.items[(size_t) ref.item];
     const float alpha = item.enabled ? 1.0f : 0.38f;
 
-    g.setColour (Theme::panel);
+    g.setColour (kCard);
     g.fillRect (area);
-    g.setColour (Theme::border.withAlpha (0.35f));
+    g.setColour (kRowDivider);
     g.fillRect (66, height - 1, width - 66, 1);
 
     // Trait d'arborescence
-    g.setColour (Theme::border);
+    g.setColour (kCardBorder);
     g.fillRect (44, 0, 1, ref.item == (int) group.items.size() - 1 ? height / 2 : height);
     g.fillRect (44, height / 2, 14, 1);
 

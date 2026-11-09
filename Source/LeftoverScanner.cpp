@@ -702,12 +702,21 @@ juce::int64 LeftoverScanner::diskSize (const juce::File& file)
 
 std::vector<std::vector<LeftoverItem>> LeftoverScanner::scan (const std::vector<LeftoverQuery>& queries,
                                                               const std::vector<juce::File>& allDeletedBundles,
-                                                              const std::atomic<bool>* shouldCancel)
+                                                              const std::atomic<bool>* shouldCancel,
+                                                              Options options)
 {
     std::vector<std::vector<LeftoverItem>> results (queries.size());
     std::unordered_set<std::string> seen;
     const auto home  = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
-    const auto roots = searchRoots();
+    auto roots = searchRoots();
+
+    if (! options.includeDocuments)
+    {
+        const auto documents = home.getChildFile ("Documents");
+        roots.erase (std::remove_if (roots.begin(), roots.end(), [&documents] (const SearchRoot& r)
+                     { return r.folder == documents || r.folder.isAChildOf (documents); }),
+                     roots.end());
+    }
 
     for (size_t qi = 0; qi < queries.size(); ++qi)
     {
@@ -721,7 +730,8 @@ std::vector<std::vector<LeftoverItem>> LeftoverScanner::scan (const std::vector<
             searchByName (root, m, out);
     }
 
-    searchReceipts (queries, allDeletedBundles, results, seen, shouldCancel);
+    if (options.includeReceipts)
+        searchReceipts (queries, allDeletedBundles, results, seen, shouldCancel);
 
     for (auto& items : results)
         removeNested (items);

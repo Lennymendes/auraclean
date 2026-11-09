@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <map>
 #include <set>
 #include <unordered_set>
@@ -18,21 +19,39 @@ namespace aura
 //==============================================================================
 juce::String formatBytes (juce::int64 bytes)
 {
-    if (bytes < 1000)
+    // Base 1024, virgule décimale française, nombre de décimales FIXE.
+    // (Ne jamais passer 0 à juce::String (double, int) : 0 = « précision complète », d'où un ancien « 508,005 Mo ».)
+    constexpr double kilo = 1024.0;
+
+    if (bytes < 0)
+        bytes = 0;
+
+    if (bytes < 1024)
         return juce::String (bytes) + " o";
 
-    static const char* units[] = { "Ko", "Mo", "Go", "To" };
-    double value = (double) bytes / 1000.0;
-    int    unit  = 0;
+    struct Unit { const char* name; double divisor; int decimals; };
+    static constexpr Unit units[] = { { "Ko", kilo, 1 },
+                                      { "Mo", kilo * kilo, 1 },
+                                      { "Go", kilo * kilo * kilo, 2 },
+                                      { "To", kilo * kilo * kilo * kilo, 2 } };
 
-    while (value >= 1000.0 && unit < 3)
-    {
-        value /= 1000.0;
+    size_t unit = 0;
+
+    while (unit + 1 < std::size (units) && (double) bytes >= units[unit + 1].divisor)
         ++unit;
+
+    // Arrondi à l'affichage : « 1023,96 Ko » doit devenir « 1,0 Mo », pas « 1024,0 Ko »
+    const double scale = std::pow (10.0, units[unit].decimals);
+    double value = std::round ((double) bytes / units[unit].divisor * scale) / scale;
+
+    if (value >= kilo && unit + 1 < std::size (units))
+    {
+        ++unit;
+        const double nextScale = std::pow (10.0, units[unit].decimals);
+        value = std::round ((double) bytes / units[unit].divisor * nextScale) / nextScale;
     }
 
-    const int decimals = value < 10.0 ? 2 : (value < 100.0 ? 1 : 0);
-    return juce::String (value, decimals).replaceCharacter ('.', ',') + " " + units[unit];
+    return juce::String (value, units[unit].decimals).replaceCharacter ('.', ',') + " " + units[unit].name;
 }
 
 namespace
@@ -81,6 +100,38 @@ namespace
         }
     }
 
+    float easeOutCubic (float t)
+    {
+        t = juce::jlimit (0.0f, 1.0f, t);
+        return 1.0f - std::pow (1.0f - t, 3.0f);
+    }
+
+    /** Calque translucide + léger glissement vertical pendant l'apparition d'une ligne. */
+    struct ScopedRevealLayer
+    {
+        ScopedRevealLayer (juce::Graphics& graphics, float alpha) : g (graphics), active (alpha < 1.0f)
+        {
+            if (! active)
+                return;
+
+            g.beginTransparencyLayer (juce::jmax (0.0f, alpha));
+            g.saveState();
+            g.addTransform (juce::AffineTransform::translation (0.0f, (1.0f - alpha) * 6.0f));
+        }
+
+        ~ScopedRevealLayer()
+        {
+            if (! active)
+                return;
+
+            g.restoreState();
+            g.endTransparencyLayer();
+        }
+
+        juce::Graphics& g;
+        const bool      active;
+    };
+
     void drawCheckbox (juce::Graphics& g, juce::Rectangle<float> r, CheckState state)
     {
         if (state == CheckState::None)
@@ -124,6 +175,7 @@ void Library::setScanResult (ScanResult newResult)
 
     result = std::move (newResult);
     selection.assign (result.bundles.size(), 0);
+    leftoverBytes.clear();
 
     for (size_t i = 0; i < result.bundles.size(); ++i)
         if (previouslySelected.count (result.bundles[i].file.getFullPathName().toStdString()) != 0)
@@ -135,6 +187,16 @@ void Library::setScanResult (ScanResult newResult)
         filters.vendorKey = {};
 
     rebuild();
+}
+
+void Library::setLeftoverEstimates (std::vector<juce::int64> bytesPerEntry)
+{
+    leftoverBytes = std::move (bytesPerEntry);
+}
+
+juce::int64 Library::leftoverEstimate (int entryIndex) const noexcept
+{
+    return (entryIndex >= 0 && (size_t) entryIndex < leftoverBytes.size()) ? leftoverBytes[(size_t) entryIndex] : -1;
 }
 
 bool Library::bundlePasses (int bundleIndex) const noexcept
@@ -409,6 +471,7 @@ std::vector<int> Library::selectedBundles() const
 VendorSidebar::VendorSidebar (Library& lib) : library (lib)
 {
     list.setModel (this);
+    list.onShortcut = [this] (const juce::KeyPress& key) { return onShortcut != nullptr && onShortcut (key); };
     list.setRowHeight (50);
     list.setOutlineThickness (0);
     list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
@@ -587,6 +650,7 @@ void VendorSidebar::listBoxItemClicked (int row, const juce::MouseEvent& e)
 PluginTable::PluginTable (Library& lib) : library (lib)
 {
     table.setModel (this);
+    table.onShortcut = [this] (const juce::KeyPress& key) { return onShortcut != nullptr && onShortcut (key); };
     table.setRowHeight (44);
     table.setHeaderHeight (34);
     table.setMultipleSelectionEnabled (true);
@@ -602,7 +666,7 @@ PluginTable::PluginTable (Library& lib) : library (lib)
     header.addColumn ("Formats",             colFormats, 172, 172, 172, H::notResizable);
     header.addColumn ("Architecture",        colArch,    130, 120, 180, H::defaultFlags);
     header.addColumn ("Version",             colVersion, 90,  70,  160, H::defaultFlags);
-    header.addColumn ("Taille",              colSize,    95,  80,  140, H::defaultFlags);
+    header.addColumn ("Taille",              colSize,    120, 100, 180, H::defaultFlags);
     header.addColumn (fr ("Installé le"),    colDate,    105, 90,  160, H::defaultFlags);
 
     header.setStretchToFitActive (true);
@@ -610,6 +674,36 @@ PluginTable::PluginTable (Library& lib) : library (lib)
     header.setSortColumnId (colVendor, true);
 
     addAndMakeVisible (table);
+}
+
+void PluginTable::startReveal()
+{
+    revealStartMs = juce::Time::getMillisecondCounterHiRes();
+    revealing     = true;
+    startTimerHz (60);
+    table.repaint();
+}
+
+float PluginTable::rowRevealAlpha (int row) const noexcept
+{
+    if (! revealing)
+        return 1.0f;
+
+    constexpr double staggerMs = 16.0, durationMs = 240.0;
+    const auto elapsed = juce::Time::getMillisecondCounterHiRes() - revealStartMs;
+    const auto delay   = staggerMs * juce::jmin (row, 24);
+    return easeOutCubic ((float) ((elapsed - delay) / durationMs));
+}
+
+void PluginTable::timerCallback()
+{
+    if (juce::Time::getMillisecondCounterHiRes() - revealStartMs > 16.0 * 24 + 240.0 + 20.0)
+    {
+        revealing = false;
+        stopTimer();
+    }
+
+    table.repaint();
 }
 
 void PluginTable::resized()
@@ -662,6 +756,8 @@ void PluginTable::paintRowBackground (juce::Graphics& g, int row, int width, int
     if (entry < 0)
         return;
 
+    const ScopedRevealLayer layer (g, rowRevealAlpha (row));
+
     auto background = (row % 2 == 0) ? Theme::panel : Theme::panel.brighter (0.025f);
 
     if (rowIsSelected)
@@ -687,6 +783,8 @@ void PluginTable::paintCell (juce::Graphics& g, int row, int columnId, int width
 
     if (entryIndex < 0)
         return;
+
+    const ScopedRevealLayer layer (g, rowRevealAlpha (row));
 
     const auto& data  = library.data();
     const auto& entry = data.entries[(size_t) entryIndex];
@@ -793,9 +891,26 @@ void PluginTable::paintCell (juce::Graphics& g, int row, int columnId, int width
 
         case colSize:
         {
-            g.setColour (Theme::text.withMultipliedAlpha (alpha * 0.9f));
-            g.setFont (Theme::font (14.0f));
-            g.drawText (formatBytes (entry.totalSize), area, juce::Justification::centredRight, true);
+            const auto extra = library.leftoverEstimate (entryIndex);
+
+            if (extra > 0)
+            {
+                // Ligne 1 : binaires · Ligne 2 : presets / données détectés
+                auto top = area.removeFromTop (height / 2 + 2);
+                g.setColour (Theme::text.withMultipliedAlpha (alpha * 0.9f));
+                g.setFont (Theme::font (14.0f));
+                g.drawText (formatBytes (entry.totalSize), top, juce::Justification::bottomRight, true);
+
+                g.setColour (Theme::textFaint.withMultipliedAlpha (alpha));
+                g.setFont (Theme::font (11.5f));
+                g.drawText ("+ " + formatBytes (extra) + fr (" données"), area, juce::Justification::topRight, true);
+            }
+            else
+            {
+                g.setColour (Theme::text.withMultipliedAlpha (alpha * 0.9f));
+                g.setFont (Theme::font (14.0f));
+                g.drawText (formatBytes (entry.totalSize), area, juce::Justification::centredRight, true);
+            }
             break;
         }
 
@@ -889,6 +1004,56 @@ void PluginTable::sortOrderChanged (int newSortColumnId, bool isForwards)
     table.repaint();
 }
 
+juce::String PluginTable::formatTooltip (int entryIndex, PluginFormat format) const
+{
+    const auto& data  = library.data();
+    const auto& entry = data.entries[(size_t) entryIndex];
+    juce::StringArray blocks;
+
+    for (int bi : entry.bundles[(size_t) format])
+    {
+        const auto& b = data.bundles[(size_t) bi];
+        juce::String block;
+        block << formatLabel (format) << fr ("  —  ") << b.file.getFileName() << "\n"
+              << b.file.getFullPathName() << "\n"
+              << fr ("Taille : ") << formatBytes (b.sizeBytes)
+              << fr ("  ·  Version : ") << (b.version.isNotEmpty() ? b.version : fr ("—"))
+              << fr ("  ·  ") << archDetail (b.archFlags)
+              << fr ("  ·  ") << scopeLabel (b.scope);
+
+        if (b.disabled)  block << fr ("  ·  désactivé");
+        if (b.isSymlink) block << fr ("  ·  lien symbolique");
+        if (b.bundleId.isNotEmpty()) block << "\n" << b.bundleId;
+
+        blocks.add (block);
+    }
+
+    return blocks.joinIntoString ("\n\n");
+}
+
+juce::String PluginTable::sizeTooltip (int entryIndex) const
+{
+    const auto& entry = library.data().entries[(size_t) entryIndex];
+    const auto extra  = library.leftoverEstimate (entryIndex);
+
+    juce::String tip;
+    tip << fr ("Binaires (bundles) : ") << formatBytes (entry.totalSize);
+
+    if (extra < 0)
+    {
+        tip << "\n" << fr ("Presets & données : estimation en cours…");
+    }
+    else
+    {
+        tip << "\n" << fr ("Presets & données détectés : ") << formatBytes (extra)
+            << "\n" << fr ("Taille réelle totale : ") << formatBytes (entry.totalSize + extra)
+            << "\n\n" << fr ("Estimation hors ~/Documents et reçus d'installation :")
+            << "\n" << fr ("le détail complet est calculé à la désinstallation.");
+    }
+
+    return tip;
+}
+
 juce::String PluginTable::getCellTooltip (int row, int columnId)
 {
     const int entryIndex = entryForRow (row);
@@ -896,59 +1061,110 @@ juce::String PluginTable::getCellTooltip (int row, int columnId)
     if (entryIndex < 0 || columnId == colCheck)
         return {};
 
-    const auto& data  = library.data();
-    const auto& entry = data.entries[(size_t) entryIndex];
-    juce::StringArray lines;
+    const auto& entry = library.data().entries[(size_t) entryIndex];
 
-    for (auto f : kAllFormats)
+    if (columnId == colSize)
+        return sizeTooltip (entryIndex);
+
+    if (columnId == colFormats)
     {
-        for (int bi : entry.bundles[(size_t) f])
-        {
-            const auto& b = data.bundles[(size_t) bi];
-            auto line = "[" + formatLabel (f) + "] " + b.file.getFullPathName();
-            line << "\n      " << (b.version.isNotEmpty() ? b.version : juce::String ("?"))
-                 << fr ("  ·  ") << archDetail (b.archFlags)
-                 << fr ("  ·  ") << formatBytes (b.sizeBytes)
-                 << fr ("  ·  ") << scopeLabel (b.scope);
+        // Infobulle propre au badge survolé : position souris → badge
+        const auto mouse = table.getMouseXYRelative();
+        const auto cell  = table.getCellPosition (colFormats, row, true);
+        const juce::Point<int> local (mouse.x - cell.getX(), mouse.y - cell.getY());
 
-            if (b.disabled)  line << fr ("  ·  désactivé");
-            if (b.isSymlink) line << fr ("  ·  lien symbolique");
-            if (b.bundleId.isNotEmpty()) line << "\n      " << b.bundleId;
+        for (int f = 0; f < kNumFormats; ++f)
+            if (entry.has (kAllFormats[(size_t) f]) && formatBadgeBounds (f, table.getRowHeight()).expanded (3).contains (local))
+                return formatTooltip (entryIndex, kAllFormats[(size_t) f]);
 
-            lines.add (line);
-        }
+        return fr ("Survolez un badge pour voir le chemin et la taille du fichier.\nCliquez dessus pour le cocher.");
     }
 
-    return lines.joinIntoString ("\n");
+    juce::StringArray blocks;
+
+    for (auto f : kAllFormats)
+        if (entry.has (f))
+            blocks.add (formatTooltip (entryIndex, f));
+
+    return blocks.joinIntoString ("\n\n");
 }
 
 void PluginTable::showContextMenu (int entryIndex)
 {
-    const auto& data  = library.data();
-    const auto& entry = data.entries[(size_t) entryIndex];
+    const auto& data    = library.data();
+    const auto& entry   = data.entries[(size_t) entryIndex];
     const bool  checked = library.entryState (entryIndex) == CheckState::All;
+
+    enum MenuId
+    {
+        idToggle      = 1,
+        idCopyPaths   = 2,
+        idCopyAllIds  = 3,
+        idUninstall   = 4,
+        idRevealBase  = 1000000,
+        idCopyIdBase  = 2000000
+    };
 
     juce::PopupMenu menu;
     menu.addSectionHeader (entry.vendor + fr (" — ") + entry.name);
-    menu.addItem (1, checked ? fr ("Décocher") : fr ("Cocher"));
+
+    // ---- Finder : un élément par format installé (et par copie)
+    for (auto f : kAllFormats)
+    {
+        const auto& list = entry.bundles[(size_t) f];
+
+        for (int bi : list)
+        {
+            const auto& b = data.bundles[(size_t) bi];
+            auto text = fr ("Afficher le ") + formatLabel (f) + fr (" dans le Finder");
+
+            if (list.size() > 1 || b.disabled)
+                text << " (" << scopeLabel (b.scope) << (b.disabled ? fr (", désactivé") : juce::String()) << ")";
+
+            menu.addItem (idRevealBase + bi, text);
+        }
+    }
+
     menu.addSeparator();
+
+    // ---- Bundle ID : direct s'il est unique, sinon sous-menu par format
+    juce::StringArray uniqueIds;
+    juce::PopupMenu idMenu;
 
     for (auto f : kAllFormats)
     {
         for (int bi : entry.bundles[(size_t) f])
         {
-            const auto& b = data.bundles[(size_t) bi];
-            menu.addItem (1000 + bi, fr ("Afficher dans le Finder — ") + formatLabel (f) + " (" + scopeLabel (b.scope)
-                                         + (b.disabled ? fr (", désactivé") : juce::String()) + ")");
+            const auto& id = data.bundles[(size_t) bi].bundleId;
+
+            if (id.isEmpty())
+                continue;
+
+            idMenu.addItem (idCopyIdBase + bi, formatLabel (f) + fr ("  —  ") + id);
+            uniqueIds.addIfNotAlreadyThere (id);
         }
     }
 
+    if (uniqueIds.size() == 1)
+        menu.addItem (idCopyAllIds, fr ("Copier le Bundle ID"));
+    else if (uniqueIds.size() > 1)
+    {
+        idMenu.addSeparator();
+        idMenu.addItem (idCopyAllIds, fr ("Copier tous les Bundle ID"));
+        menu.addSubMenu (fr ("Copier le Bundle ID"), idMenu);
+    }
+    else
+        menu.addItem (idCopyAllIds, fr ("Copier le Bundle ID"), false);
+
+    menu.addItem (idCopyPaths, fr ("Copier les chemins"));
     menu.addSeparator();
-    menu.addItem (2, fr ("Copier les chemins"));
+    menu.addItem (idToggle, checked ? fr ("Décocher") : fr ("Cocher"));
+    menu.addSeparator();
+    menu.addItem (idUninstall, fr ("Désinstaller ce plugin…"));
 
     juce::Component::SafePointer<PluginTable> safe (this);
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [safe, entryIndex] (int result)
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [safe, entryIndex, uniqueIds] (int result)
     {
         auto* self = safe.getComponent();
 
@@ -960,12 +1176,12 @@ void PluginTable::showContextMenu (int entryIndex)
         if ((size_t) entryIndex >= d.entries.size())
             return;
 
-        if (result == 1)
+        if (result == idToggle)
         {
             self->library.toggleEntry (entryIndex);
             self->notifyChanged();
         }
-        else if (result == 2)
+        else if (result == idCopyPaths)
         {
             juce::StringArray paths;
 
@@ -975,9 +1191,22 @@ void PluginTable::showContextMenu (int entryIndex)
 
             juce::SystemClipboard::copyTextToClipboard (paths.joinIntoString ("\n"));
         }
-        else if (result >= 1000 && (size_t) (result - 1000) < d.bundles.size())
+        else if (result == idCopyAllIds)
         {
-            d.bundles[(size_t) (result - 1000)].file.revealToUser();
+            juce::SystemClipboard::copyTextToClipboard (uniqueIds.joinIntoString ("\n"));
+        }
+        else if (result == idUninstall)
+        {
+            if (self->onUninstallEntry)
+                self->onUninstallEntry (entryIndex);
+        }
+        else if (result >= idCopyIdBase && (size_t) (result - idCopyIdBase) < d.bundles.size())
+        {
+            juce::SystemClipboard::copyTextToClipboard (d.bundles[(size_t) (result - idCopyIdBase)].bundleId);
+        }
+        else if (result >= idRevealBase && (size_t) (result - idRevealBase) < d.bundles.size())
+        {
+            d.bundles[(size_t) (result - idRevealBase)].file.revealToUser();
         }
     });
 }
@@ -1060,6 +1289,148 @@ void BusyOverlay::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+//  IntroOverlay
+//==============================================================================
+namespace
+{
+    constexpr double kIntroMinMs   = 600.0;  // durée minimale de la barre
+    constexpr double kIntroFadeMs  = 220.0;  // fondu de sortie
+    constexpr double kTitleInMs    = 260.0;  // apparition du titre
+}
+
+IntroOverlay::IntroOverlay()
+{
+    setVisible (false);
+    setInterceptsMouseClicks (true, true);
+}
+
+void IntroOverlay::start (const std::atomic<float>* scanProgress)
+{
+    progress    = scanProgress;
+    startMs     = juce::Time::getMillisecondCounterHiRes();
+    lastTickMs  = startMs;
+    shown       = 0.0f;
+    opacity     = 1.0f;
+    finished    = false;
+    fading      = false;
+
+    setVisible (true);
+    toFront (false);
+    startTimerHz (60);
+    repaint();
+}
+
+void IntroOverlay::finish()
+{
+    finished = true;
+}
+
+void IntroOverlay::timerCallback()
+{
+    const auto now     = juce::Time::getMillisecondCounterHiRes();
+    const auto elapsed = now - startMs;
+    const auto dt      = juce::jlimit (0.0, 100.0, now - lastTickMs);
+    lastTickMs = now;
+
+    // Cible : progression temporelle (easing) ; tant que le scan n'est pas fini, plafond à 92 %
+    const float timeTarget = easeOutCubic ((float) (elapsed / kIntroMinMs));
+    const float scanValue  = progress != nullptr ? progress->load (std::memory_order_relaxed) : 0.0f;
+    const float target     = finished ? timeTarget : 0.92f * juce::jmax (timeTarget, scanValue);
+
+    // Lissage exponentiel indépendant de la cadence d'affichage
+    shown += (target - shown) * (float) (1.0 - std::exp (-dt / 55.0));
+
+    if (finished && ! fading && elapsed >= kIntroMinMs && shown > 0.985f)
+    {
+        shown       = 1.0f;
+        fading      = true;
+        fadeStartMs = now;
+
+        if (onRevealStart)
+            onRevealStart();
+    }
+
+    if (fading)
+    {
+        opacity = 1.0f - easeOutCubic ((float) ((now - fadeStartMs) / kIntroFadeMs));
+
+        if (opacity <= 0.001f)
+        {
+            stopTimer();
+            setVisible (false);
+
+            if (onHidden)
+                onHidden();
+
+            return;
+        }
+    }
+
+    repaint();
+}
+
+void IntroOverlay::paint (juce::Graphics& g)
+{
+    g.fillAll (Theme::background.withAlpha (opacity));
+
+    const auto elapsed   = juce::Time::getMillisecondCounterHiRes() - startMs;
+    const float appear   = easeOutCubic ((float) (elapsed / kTitleInMs));
+    const float content  = appear * opacity;
+    const float lift     = (1.0f - appear) * 10.0f + (1.0f - opacity) * -6.0f;
+
+    if (content <= 0.0f)
+        return;
+
+    const auto centre = getLocalBounds().getCentre().toFloat().translated (0.0f, lift - 18.0f);
+
+    // ---- Titre « Aura Clean »
+    const auto titleFont  = Theme::font (40.0f, true);
+    const auto auraText   = juce::String ("Aura");
+    const auto cleanText  = juce::String ("Clean");
+    const float auraW     = juce::GlyphArrangement::getStringWidth (titleFont, auraText);
+    const float spaceW    = juce::GlyphArrangement::getStringWidth (titleFont, " ");
+    const float cleanW    = juce::GlyphArrangement::getStringWidth (titleFont, cleanText);
+    const float totalW    = auraW + spaceW + cleanW;
+    const float x0        = centre.x - totalW * 0.5f;
+    const juce::Rectangle<float> titleRow (x0, centre.y - 28.0f, totalW + 4.0f, 48.0f);
+
+    g.setFont (titleFont);
+    g.setColour (Theme::text.withAlpha (content));
+    g.drawText (auraText, titleRow.withWidth (auraW + 2.0f), juce::Justification::centredLeft, false);
+
+    const auto cleanArea = titleRow.withTrimmedLeft (auraW + spaceW);
+    g.setGradientFill (juce::ColourGradient (Theme::cyan.withAlpha (content), cleanArea.getX(), 0.0f,
+                                             Theme::violet.withAlpha (content), cleanArea.getX() + cleanW, 0.0f, false));
+    g.drawText (cleanText, cleanArea, juce::Justification::centredLeft, false);
+
+    g.setColour (Theme::textFaint.withAlpha (content));
+    g.setFont (Theme::font (11.5f, true));
+    g.drawText (fr ("NEXTDSP  ·  PLUGIN MANAGER"),
+                juce::Rectangle<float> (centre.x - 160.0f, centre.y + 22.0f, 320.0f, 16.0f),
+                juce::Justification::centred, false);
+
+    // ---- Barre de chargement minimale
+    const juce::Rectangle<float> track (centre.x - 120.0f, centre.y + 54.0f, 240.0f, 3.0f);
+    g.setColour (juce::Colour (0xff1b1e27).withAlpha (content));
+    g.fillRoundedRectangle (track, 1.5f);
+
+    const auto bar = track.withWidth (juce::jmax (3.0f, track.getWidth() * juce::jlimit (0.0f, 1.0f, shown)));
+    g.setGradientFill (juce::ColourGradient (Theme::cyan.withAlpha (0.85f * content), track.getX(), 0.0f,
+                                             Theme::violet.withAlpha (0.85f * content), track.getRight(), 0.0f, false));
+    g.fillRoundedRectangle (bar, 1.5f);
+
+    // Halo discret en tête de barre
+    g.setColour (Theme::cyan.withAlpha (0.18f * content));
+    g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ bar.getRight(), bar.getCentreY() }));
+
+    g.setColour (Theme::textFaint.withAlpha (content * 0.9f));
+    g.setFont (Theme::font (12.5f));
+    g.drawText (finished ? fr ("Prêt") : fr ("Analyse des plugins…"),
+                juce::Rectangle<float> (centre.x - 160.0f, track.getBottom() + 12.0f, 320.0f, 18.0f),
+                juce::Justification::centred, false);
+}
+
+//==============================================================================
 //  MainComponent
 //==============================================================================
 MainComponent::MainComponent()
@@ -1070,7 +1441,13 @@ MainComponent::MainComponent()
     searchBox.setIndents (14, 0);
     searchBox.setJustification (juce::Justification::centredLeft);
     searchBox.onTextChange = [this] { library.filters.search = searchBox.getText(); filtersChanged(); };
-    searchBox.onEscapeKey  = [this] { searchBox.setText ({}, true); };
+    searchBox.onEscapeKey  = [this]
+    {
+        if (searchBox.getText().isNotEmpty())
+            searchBox.setText ({}, true);
+        else
+            grabKeyboardFocus();  // Échap une 2e fois : quitte la recherche
+    };
     addAndMakeVisible (searchBox);
 
     for (int f = 0; f < kNumFormats; ++f)
@@ -1142,6 +1519,9 @@ MainComponent::MainComponent()
     sidebar.onFilterChanged    = [this] { filtersChanged(); };
     sidebar.onSelectionChanged = [this] { selectionChanged(); };
     table.onSelectionChanged   = [this] { selectionChanged(); };
+    table.onUninstallEntry     = [this] (int entryIndex) { uninstallEntry (entryIndex); };
+    table.onShortcut           = [this] (const juce::KeyPress& key) { return handleShortcut (key); };
+    sidebar.onShortcut         = [this] (const juce::KeyPress& key) { return handleShortcut (key); };
     addAndMakeVisible (sidebar);
     addAndMakeVisible (table);
 
@@ -1160,6 +1540,14 @@ MainComponent::MainComponent()
 
     addChildComponent (overlay);
 
+    intro.onRevealStart = [this]
+    {
+        table.startReveal();
+        juce::Desktop::getInstance().getAnimator().fadeIn (&sidebar, 260);
+    };
+    intro.onHidden = [this] { introHidden(); };
+    addChildComponent (intro);
+
     setWantsKeyboardFocus (true);
     setSize (1380, 840);
     updateButtons();
@@ -1169,6 +1557,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     cancelScan = true;
+    stopLeftoverEstimate();
     joinWorker();
 }
 
@@ -1209,7 +1598,8 @@ bool MainComponent::canQuit()
         return false;
     }
 
-    cancelScan = true;
+    cancelScan     = true;
+    cancelEstimate = true;
     return true;
 }
 
@@ -1290,6 +1680,7 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds();
     overlay.setBounds (area);
+    intro.setBounds (area);
 
     if (deepCleanDialog != nullptr)
         deepCleanDialog->setBounds (area);
@@ -1347,14 +1738,26 @@ void MainComponent::resized()
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
+    return handleShortcut (key);
+}
+
+bool MainComponent::handleShortcut (const juce::KeyPress& key)
+{
     const auto cmd = juce::ModifierKeys::commandModifier;
 
+    // Modale ouverte : elle seule reçoit le clavier (Échap ferme, Entrée confirme)
     if (deepCleanDialog != nullptr)
         return deepCleanDialog->keyPressed (key);
+
+    if (closingDialog != nullptr || intro.isActive())
+        return true;
+
+    const bool searchFocused = searchBox.hasKeyboardFocus (false);
 
     if (key == juce::KeyPress ('f', cmd, 0))
     {
         searchBox.grabKeyboardFocus();
+        searchBox.selectAll();
         return true;
     }
 
@@ -1364,14 +1767,48 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    if (key == juce::KeyPress ('a', cmd, 0) && ! searchBox.hasKeyboardFocus (false))
+    if (searchFocused)
+        return false;  // ⌘A, Suppr, Échap gardent leur sens d'édition de texte
+
+    if (key == juce::KeyPress ('a', cmd, 0))
     {
         library.selectAllVisible (true);
         selectionChanged();
         return true;
     }
 
+    if (key == juce::KeyPress::escapeKey)
+    {
+        library.clearSelection();
+        table.deselectAllRows();
+        selectionChanged();
+        return true;
+    }
+
+    if (key == juce::KeyPress::backspaceKey || key == juce::KeyPress::deleteKey
+        || key == juce::KeyPress (juce::KeyPress::backspaceKey, cmd, 0))
+    {
+        if (! busy && summary.bundles > 0)
+            requestOperation (Operation::Uninstall);
+
+        return true;
+    }
+
     return false;
+}
+
+void MainComponent::uninstallEntry (int entryIndex)
+{
+    if (busy || entryIndex < 0 || (size_t) entryIndex >= library.data().entries.size())
+        return;
+
+    std::vector<int> targets;
+
+    for (const auto& list : library.data().entries[(size_t) entryIndex].bundles)
+        targets.insert (targets.end(), list.begin(), list.end());
+
+    if (! targets.empty())
+        startDeepClean (std::move (targets), 0);
 }
 
 //==============================================================================
@@ -1405,17 +1842,20 @@ void MainComponent::updateButtons()
 }
 
 //==============================================================================
-void MainComponent::startScan()
+void MainComponent::startScan (bool withIntro)
 {
     if (busy)
         return;
 
+    stopLeftoverEstimate();
     joinWorker();
     busy = true;
     cancelScan = false;
     progress = 0.0f;
     updateButtons();
-    overlay.show (fr ("Analyse des plugins installés…"), &progress);
+
+    if (withIntro)
+        intro.start (&progress);
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
@@ -1435,23 +1875,108 @@ void MainComponent::startScan()
 void MainComponent::scanFinished (ScanResult result)
 {
     busy = false;
-    overlay.hide();
 
     if (result.cancelled)
     {
+        intro.finish();
         updateButtons();
         return;
     }
 
     const int bundleCount = (int) result.bundles.size();
     const int pluginCount = (int) result.entries.size();
-    const auto seconds    = juce::String (result.elapsedMs / 1000.0, 2).replaceCharacter ('.', ',');
+    const auto duration   = result.elapsedMs < 1000.0
+                              ? juce::String (juce::jmax (1, juce::roundToInt (result.elapsedMs))) + " ms"
+                              : juce::String (result.elapsedMs / 1000.0, 2).replaceCharacter ('.', ',') + " s";
 
     library.setScanResult (std::move (result));
     sidebar.refresh();
     sidebar.setStats (countLabel (pluginCount, "plugin", "plugins") + fr ("  ·  ")
-                      + countLabel (bundleCount, "bundle", "bundles") + fr ("  ·  ") + seconds + " s");
+                      + countLabel (bundleCount, "bundle", "bundles") + fr ("  ·  ") + duration);
     filtersChanged();
+
+    ++scanGeneration;
+    startLeftoverEstimate();
+
+    // Les données sont en place derrière l'intro : elle peut terminer sa barre et s'effacer
+    if (intro.isActive())
+        intro.finish();
+}
+
+void MainComponent::introHidden()
+{
+    grabKeyboardFocus();
+}
+
+//==============================================================================
+void MainComponent::startLeftoverEstimate()
+{
+    stopLeftoverEstimate();
+
+    const auto& data = library.data();
+    std::vector<LeftoverQuery> queries;
+    queries.reserve (data.entries.size());
+
+    for (const auto& entry : data.entries)
+    {
+        LeftoverQuery q;
+        q.pluginName = entry.name;
+        q.vendorName = entry.unknownVendor ? juce::String() : entry.vendor;
+
+        for (const auto& list : entry.bundles)
+        {
+            for (int bi : list)
+            {
+                const auto& b = data.bundles[(size_t) bi];
+                q.bundles.push_back (b.file);
+
+                if (b.bundleId.isNotEmpty())
+                    q.bundleIds.addIfNotAlreadyThere (b.bundleId);
+            }
+        }
+
+        queries.push_back (std::move (q));
+    }
+
+    cancelEstimate = false;
+    const int generation = scanGeneration;
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    estimateWorker = std::thread ([this, safe, generation, queryList = std::move (queries)]
+    {
+        // Sans ~/Documents (pas d'invite d'autorisation macOS au lancement) ni reçus .pkg (lsbom)
+        LeftoverScanner::Options options;
+        options.includeReceipts  = false;
+        options.includeDocuments = false;
+
+        const auto results = LeftoverScanner::scan (queryList, {}, &cancelEstimate, options);
+
+        if (cancelEstimate.load())
+            return;
+
+        std::vector<juce::int64> bytes (queryList.size(), 0);
+
+        for (size_t i = 0; i < results.size() && i < bytes.size(); ++i)
+            for (const auto& item : results[i])
+                bytes[i] += item.sizeBytes;
+
+        juce::MessageManager::callAsync ([safe, generation, values = std::move (bytes)]() mutable
+        {
+            if (auto* self = safe.getComponent(); self != nullptr && self->scanGeneration == generation)
+            {
+                self->library.setLeftoverEstimates (std::move (values));
+                self->table.refresh();
+            }
+        });
+    });
+}
+
+void MainComponent::stopLeftoverEstimate()
+{
+    cancelEstimate = true;
+
+    if (estimateWorker.joinable())
+        estimateWorker.join();
 }
 
 //==============================================================================
@@ -1667,7 +2192,7 @@ void MainComponent::operationFinished (Operation op, const OperationReport& repo
                                       .withAssociatedComponent (this),
                                   nullptr);
 
-    startScan();
+    startScan (false);  // rescan silencieux : pas d'intro après une opération
 }
 
 //==============================================================================
@@ -1856,16 +2381,19 @@ void MainComponent::closeDeepClean()
     if (deepCleanDialog == nullptr)
         return;
 
-    // Destruction différée : on est peut-être dans le onClick d'un de ses boutons
-    deepCleanDialog->setVisible (false);
+    // Fondu de sortie, puis destruction différée (on est peut-être dans le onClick d'un de ses boutons)
     juce::Component::SafePointer<MainComponent> safe (this);
+    closingDialog = std::move (deepCleanDialog);
 
-    juce::MessageManager::callAsync ([safe, dialog = deepCleanDialog.release()]
+    auto* closing = closingDialog.get();
+
+    closingDialog->dismiss ([safe, closing]
     {
-        std::unique_ptr<DeepCleanDialog> owned (dialog);
-
-        if (auto* self = safe.getComponent())
-            self->removeChildComponent (owned.get());
+        juce::MessageManager::callAsync ([safe, closing]
+        {
+            if (auto* self = safe.getComponent(); self != nullptr && self->closingDialog.get() == closing)
+                self->closingDialog.reset();
+        });
     });
 
     grabKeyboardFocus();
