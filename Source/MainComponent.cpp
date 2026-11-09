@@ -1596,11 +1596,11 @@ void MainComponent::runOperation (Operation op, std::vector<int> bundleIndices)
     juce::Component::SafePointer<MainComponent> safe (this);
     auto roots = PluginScanner::allowedRoots();
 
-    worker = std::thread ([safe, op, files = std::move (files), moves = std::move (moves),
-                           roots = std::move (roots), touchesAudioUnits]
+    worker = std::thread ([safe, op, fileList = std::move (files), moveList = std::move (moves),
+                           rootList = std::move (roots), touchesAudioUnits]
     {
-        const auto report = op == Operation::Uninstall ? UninstallerMac::moveToTrash (files, roots)
-                                                       : UninstallerMac::moveBundles (moves, roots);
+        const auto report = op == Operation::Uninstall ? UninstallerMac::moveToTrash (fileList, rootList)
+                                                       : UninstallerMac::moveBundles (moveList, rootList);
 
         if (touchesAudioUnits && report.succeeded > 0)
             UninstallerMac::refreshAudioUnitRegistrar();
@@ -1778,14 +1778,14 @@ void MainComponent::startDeepClean (std::vector<int> targets, int hiddenCount)
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    worker = std::thread ([this, safe, groups, queries = std::move (queries), queryGroup = std::move (queryGroup),
-                           allDeleted = std::move (allDeleted), warning, searched]
+    worker = std::thread ([this, safe, groups, queryList = std::move (queries), groupOfQuery = std::move (queryGroup),
+                           deletedBundles = std::move (allDeleted), warning, searched]
     {
-        const auto results = LeftoverScanner::scan (queries, allDeleted, &cancelScan);
+        const auto results = LeftoverScanner::scan (queryList, deletedBundles, &cancelScan);
 
-        for (size_t qi = 0; qi < results.size() && qi < queryGroup.size(); ++qi)
+        for (size_t qi = 0; qi < results.size() && qi < groupOfQuery.size(); ++qi)
         {
-            auto& group = (*groups)[queryGroup[qi]];
+            auto& group = (*groups)[groupOfQuery[qi]];
 
             for (const auto& leftover : results[qi])
             {
@@ -1895,10 +1895,10 @@ void MainComponent::runTrash (std::vector<CleanCandidate> candidates)
     juce::Component::SafePointer<MainComponent> safe (this);
     auto roots = PluginScanner::allowedRoots();
 
-    worker = std::thread ([safe, items = std::move (items), sizes = std::move (sizes),
-                           roots = std::move (roots), touchesAudioUnits]
+    worker = std::thread ([safe, trashItems = std::move (items), sizeByPath = std::move (sizes),
+                           rootList = std::move (roots), touchesAudioUnits]
     {
-        const auto report = UninstallerMac::moveItemsToTrash (items, roots);
+        const auto report = UninstallerMac::moveItemsToTrash (trashItems, rootList);
 
         if (touchesAudioUnits && report.succeeded > 0)
             UninstallerMac::refreshAudioUnitRegistrar();
@@ -1906,7 +1906,7 @@ void MainComponent::runTrash (std::vector<CleanCandidate> candidates)
         juce::int64 bytes = 0;
 
         for (const auto& path : report.succeededPaths)
-            if (const auto it = sizes.find (path); it != sizes.end())
+            if (const auto it = sizeByPath.find (path); it != sizeByPath.end())
                 bytes += it->second;
 
         juce::MessageManager::callAsync ([safe, report, bytes]
