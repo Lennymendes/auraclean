@@ -18,7 +18,10 @@
 #include <thread>
 #include <vector>
 
+#include "AppInfo.h"
+#include "AuraWidgets.h"
 #include "DeepCleanDialog.h"
+#include "SettingsDialog.h"
 #include "LeftoverScanner.h"
 #include "PluginScanner.h"
 #include "UninstallerMac.h"
@@ -314,7 +317,8 @@ public:
 
     /** Vérification de mise à jour. userInitiated = depuis le menu : affiche aussi « à jour » / erreurs. */
     void checkForUpdates (bool userInitiated);
-    void showAbout();
+    void showAbout();     // = showSettings() (section « À propos » incluse)
+    void showSettings();
 
     static juce::String applicationVersion();
 
@@ -351,6 +355,8 @@ private:
     Library library;  // doit précéder les vues qui le référencent
 
     // Header
+    LogoButton                          logoButton { AppInfo::logo() };
+    IconButton                          settingsButton { IconButton::Glyph::Gear, juce::String::fromUTF8 ("Réglages (⌘,)") };
     juce::TextEditor                    searchBox;
     std::array<juce::TextButton, kNumFormats> formatChips;
     juce::ComboBox                      archBox, statusBox;
@@ -372,6 +378,10 @@ private:
     bool                             hasPendingUpdate = false;
 
     void handleUpdateResult (const UpdateInfo&, bool userInitiated);
+
+    std::unique_ptr<SettingsDialog>  settingsDialog;
+    std::unique_ptr<SettingsDialog>  closingSettings;  // en cours de fondu de sortie
+    void closeSettings();
 
     BusyOverlay                      overlay;
     IntroOverlay                     intro;

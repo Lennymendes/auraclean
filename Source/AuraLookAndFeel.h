@@ -347,6 +347,30 @@ public:
     }
 
     //==========================================================================
+    /** ToggleButton en interrupteur façon Réglages macOS : libellé à gauche, switch à droite. */
+    void drawToggleButton (juce::Graphics& g, juce::ToggleButton& button, bool highlighted, bool) override
+    {
+        auto bounds = button.getLocalBounds();
+        const bool on = button.getToggleState();
+        const float alpha = button.isEnabled() ? 1.0f : 0.4f;
+
+        const auto track = bounds.removeFromRight (44).toFloat().withSizeKeepingCentre (38.0f, 22.0f);
+        g.setColour ((on ? Theme::cyan : Theme::raised).withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (track, 11.0f);
+        g.setColour ((on ? Theme::cyan.brighter (0.2f) : (highlighted ? Theme::textFaint : Theme::border)).withMultipliedAlpha (alpha));
+        g.drawRoundedRectangle (track.reduced (0.5f), 11.0f, 1.0f);
+
+        const auto knob = juce::Rectangle<float> (16.0f, 16.0f)
+                              .withCentre ({ on ? track.getRight() - 11.0f : track.getX() + 11.0f, track.getCentreY() });
+        g.setColour ((on ? Theme::background : Theme::textDim).withMultipliedAlpha (alpha));
+        g.fillEllipse (knob);
+
+        g.setColour (Theme::text.withMultipliedAlpha (alpha));
+        g.setFont (Theme::font (14.5f));
+        g.drawText (button.getButtonText(), bounds.withTrimmedRight (10), juce::Justification::centredLeft, true);
+    }
+
+    //==========================================================================
     int getDefaultScrollbarWidth() override { return 10; }
 
     void drawScrollbar (juce::Graphics& g, juce::ScrollBar&, int x, int y, int width, int height, bool isVertical,

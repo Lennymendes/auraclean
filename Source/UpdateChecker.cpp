@@ -301,4 +301,17 @@ void UpdateChecker::setSkippedVersion (const juce::String& version)
     settings.saveIfNeeded();
 }
 
+bool UpdateChecker::isAutoCheckEnabled()
+{
+    juce::PropertiesFile settings (preferenceOptions());
+    return settings.getBoolValue ("autoCheckUpdates", true);
+}
+
+void UpdateChecker::setAutoCheckEnabled (bool enabled)
+{
+    juce::PropertiesFile settings (preferenceOptions());
+    settings.setValue ("autoCheckUpdates", enabled);
+    settings.saveIfNeeded();
+}
+
 } // namespace aura

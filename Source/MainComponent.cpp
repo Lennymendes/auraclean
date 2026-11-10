@@ -1612,6 +1612,13 @@ MainComponent::MainComponent()
     statusBox.onChange = [this] { library.filters.status = (StatusFilter) statusBox.getSelectedId(); filtersChanged(); };
     addAndMakeVisible (statusBox);
 
+    logoButton.setTooltip (fr ("Ouvrir ") + AppInfo::websiteLabel);
+    logoButton.onClick = [] { AppInfo::openWebsite(); };
+    addAndMakeVisible (logoButton);
+
+    settingsButton.onClick = [this] { showSettings(); };
+    addAndMakeVisible (settingsButton);
+
     setupButton (rescanButton, fr ("Rescanner"), "ghost");
     rescanButton.setTooltip (fr ("Relancer l'analyse (⌘R)"));
     rescanButton.onClick = [this] { startScan(); };
@@ -1687,7 +1694,9 @@ MainComponent::MainComponent()
     addChildComponent (intro);
 
     // ---- Mises à jour
-    updateBanner.onLayoutChanged = [this] { resized(); };
+    // La bannière décale toute l'interface : il faut aussi redessiner ce que MainComponent peint
+    // lui-même (fond d'en-tête, séparateurs, libellés), sinon il reste des traces aux anciennes positions.
+    updateBanner.onLayoutChanged = [this] { resized(); repaint(); };
     updateBanner.onDownload      = [] (const juce::URL& url)
     {
         if (UpdateChecker::isTrustedDownloadUrl (url))
@@ -1700,7 +1709,7 @@ MainComponent::MainComponent()
     juce::Component::SafePointer<MainComponent> safeSelf (this);
     juce::Timer::callAfterDelay (1500, [safeSelf]
     {
-        if (auto* self = safeSelf.getComponent())
+        if (auto* self = safeSelf.getComponent(); self != nullptr && UpdateChecker::isAutoCheckEnabled())
             self->checkForUpdates (false);
     });
 
@@ -1770,18 +1779,7 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (Theme::border);
     g.fillRect (headerArea.getX(), headerArea.getBottom() - 1, headerArea.getWidth(), 1);
 
-    auto logo = headerArea.withWidth (270).reduced (22, 12);
-    auto titleLine = logo.removeFromTop (28);
-
-    g.setFont (Theme::font (24.0f, true));
-    g.setColour (Theme::text);
-    g.drawText ("Aura", titleLine, juce::Justification::bottomLeft, false);
-    Theme::drawGradientText (g, "Clean", Theme::font (24.0f, true), titleLine.withTrimmedLeft (57).toFloat(),
-                             juce::Justification::bottomLeft, Theme::cyan, Theme::violet);
-
-    g.setColour (Theme::textFaint);
-    g.setFont (Theme::font (12.0f, true));
-    g.drawText (fr ("NEXTDSP  ·  PLUGIN MANAGER"), logo, juce::Justification::topLeft, false);
+    // (logo + titre : composant LogoButton, cliquable vers le site)
 
     // ---- Barre de sélection rapide
     g.setColour (Theme::panelAlt);
@@ -1843,6 +1841,10 @@ void MainComponent::resized()
     if (closingDialog != nullptr)
         closingDialog->setBounds (area);
 
+    for (auto* panel : { settingsDialog.get(), closingSettings.get() })
+        if (panel != nullptr)
+            panel->setBounds (area);
+
     if (const int bannerHeight = updateBanner.getCurrentHeight(); bannerHeight > 0)
         updateBanner.setBounds (area.removeFromTop (bannerHeight));
     else
@@ -1854,8 +1856,12 @@ void MainComponent::resized()
     bulkArea = area.removeFromTop (50);
     table.setBounds (area);
 
+    logoButton.setBounds (headerArea.withWidth (262).reduced (10, 9));
+
     // ---- Header (de droite à gauche)
     auto h = headerArea.reduced (16, 15).withTrimmedLeft (270 - 16);
+    settingsButton.setBounds (h.removeFromRight (h.getHeight()));
+    h.removeFromRight (8);
     rescanButton.setBounds (h.removeFromRight (118));
     h.removeFromRight (10);
     statusBox.setBounds (h.removeFromRight (150));
@@ -1912,8 +1918,17 @@ bool MainComponent::handleShortcut (const juce::KeyPress& key)
     if (deepCleanDialog != nullptr)
         return deepCleanDialog->keyPressed (key);
 
-    if (closingDialog != nullptr || intro.isActive())
+    if (settingsDialog != nullptr)
+        return settingsDialog->keyPressed (key);
+
+    if (closingDialog != nullptr || closingSettings != nullptr || intro.isActive())
         return true;
+
+    if (key == juce::KeyPress (',', cmd, 0))
+    {
+        showSettings();
+        return true;
+    }
 
     const bool searchFocused = searchBox.hasKeyboardFocus (false);
 
@@ -2093,6 +2108,9 @@ void MainComponent::checkForUpdates (bool userInitiated)
     if (updateChecker.isChecking())
         return;
 
+    if (settingsDialog != nullptr)
+        settingsDialog->setChecking();
+
     juce::Component::SafePointer<MainComponent> safe (this);
 
     updateChecker.check ([safe, userInitiated] (const UpdateInfo& info)
@@ -2105,6 +2123,13 @@ void MainComponent::checkForUpdates (bool userInitiated)
 void MainComponent::handleUpdateResult (const UpdateInfo& info, bool userInitiated)
 {
     using Status = UpdateInfo::Status;
+
+    // Réglages ouverts : le résultat s'affiche dans le panneau (pas d'alerte par-dessus)
+    if (settingsDialog != nullptr)
+    {
+        settingsDialog->showUpdateResult (info);
+        return;
+    }
 
     if (info.status == Status::UpdateAvailable)
     {
@@ -2143,23 +2168,67 @@ void MainComponent::handleUpdateResult (const UpdateInfo& info, bool userInitiat
 
 void MainComponent::showAbout()
 {
+    showSettings();
+}
+
+void MainComponent::showSettings()
+{
+    if (settingsDialog != nullptr || deepCleanDialog != nullptr)
+        return;
+
+    settingsDialog = std::make_unique<SettingsDialog> (AppInfo::logo(), applicationVersion(),
+                                                       UpdateChecker::isAutoCheckEnabled());
+
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
-                                      .withIconType (juce::MessageBoxIconType::NoIcon)
-                                      .withTitle ("AuraClean")
-                                      .withMessage (fr ("Version ") + applicationVersion()
-                                                    + fr ("\n\nGestionnaire et désinstalleur de plugins audio\n"
-                                                          "VST3 · Audio Units · AAX\n\n© 2026 NextDSP — AuraSuite"))
-                                      .withButton (fr ("Rechercher des mises à jour"))
-                                      .withButton (fr ("Fermer"))
-                                      .withAssociatedComponent (this),
-                                  [safe] (int result)
-                                  {
-                                      if (result == 1)
-                                          if (auto* self = safe.getComponent())
-                                              self->checkForUpdates (true);
-                                  });
+    settingsDialog->onClose = [safe]
+    {
+        if (auto* self = safe.getComponent())
+            self->closeSettings();
+    };
+
+    settingsDialog->onCheckForUpdates = [safe]
+    {
+        if (auto* self = safe.getComponent())
+            self->checkForUpdates (true);
+    };
+
+    settingsDialog->onAutoCheckChanged = [] (bool enabled) { UpdateChecker::setAutoCheckEnabled (enabled); };
+
+    settingsDialog->onDownload = [] (const juce::URL& url)
+    {
+        if (UpdateChecker::isTrustedDownloadUrl (url))
+            url.launchInDefaultBrowser();
+    };
+
+    addAndMakeVisible (*settingsDialog);
+    settingsDialog->setBounds (getLocalBounds());
+    settingsDialog->toFront (true);
+    settingsDialog->grabKeyboardFocus();
+
+    if (updateChecker.isChecking())
+        settingsDialog->setChecking();
+}
+
+void MainComponent::closeSettings()
+{
+    if (settingsDialog == nullptr)
+        return;
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    closingSettings = std::move (settingsDialog);
+    auto* closing = closingSettings.get();
+
+    closingSettings->dismiss ([safe, closing]
+    {
+        juce::MessageManager::callAsync ([safe, closing]
+        {
+            if (auto* self = safe.getComponent(); self != nullptr && self->closingSettings.get() == closing)
+                self->closingSettings.reset();
+        });
+    });
+
+    grabKeyboardFocus();
 }
 
 //==============================================================================

@@ -5,6 +5,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "AuraLookAndFeel.h"
+#include "AppInfo.h"
 #include "MainComponent.h"
 #include "UninstallerMac.h"
 
@@ -17,7 +18,8 @@ public:
     {
         aboutId = 1,
         checkUpdatesId,
-        websiteId
+        websiteId,
+        settingsId
     };
 
     explicit AppMenuModel (std::function<aura::MainComponent*()> mainComponentGetter)
@@ -29,6 +31,8 @@ public:
         juce::PopupMenu m;
         m.addItem (aboutId, juce::String::fromUTF8 ("À propos d'AuraClean…"));
         m.addItem (checkUpdatesId, juce::String::fromUTF8 ("Rechercher des mises à jour…"));
+        m.addSeparator();
+        m.addItem (settingsId, juce::String::fromUTF8 ("Réglages…  (⌘,)"));
         m.addSeparator();
         return m;
     }
@@ -52,7 +56,8 @@ public:
         {
             case aboutId:        if (main != nullptr) main->showAbout(); break;
             case checkUpdatesId: if (main != nullptr) main->checkForUpdates (true); break;
-            case websiteId:      juce::URL ("https://nextdsp.com").launchInDefaultBrowser(); break;
+            case settingsId:     if (main != nullptr) main->showSettings(); break;
+            case websiteId:      aura::AppInfo::openWebsite(); break;
             default: break;
         }
     }

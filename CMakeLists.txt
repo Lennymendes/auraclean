@@ -40,12 +40,19 @@ endif()
 # ------------------------------------------------------------------------------
 #  Application
 # ------------------------------------------------------------------------------
+# Logo embarqué (BinaryData::AuraCleanLogo_png) pour l'en-tête et les Réglages
+juce_add_binary_data(AuraCleanBinaryData
+    HEADER_NAME BinaryData.h
+    NAMESPACE   BinaryData
+    SOURCES     Resources/AuraCleanLogo.png)
+
 juce_add_gui_app(AuraClean
     PRODUCT_NAME                 "AuraClean"
     COMPANY_NAME                 "NextDSP"
     COMPANY_WEBSITE              "https://nextdsp.com"
     BUNDLE_ID                    "com.nextdsp.auraclean"
     VERSION                      ${PROJECT_VERSION}
+    ICON_BIG                     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AuraClean-icon.png"
     HARDENED_RUNTIME_ENABLED     TRUE
     HARDENED_RUNTIME_OPTIONS     "com.apple.security.automation.apple-events"
     PLIST_TO_MERGE               "<plist><dict>
@@ -63,7 +70,11 @@ target_sources(AuraClean PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
+    Source/AppInfo.h
     Source/AuraLookAndFeel.h
+    Source/AuraWidgets.h
+    Source/SettingsDialog.cpp
+    Source/SettingsDialog.h
     Source/DeepCleanDialog.cpp
     Source/DeepCleanDialog.h
     Source/LeftoverScanner.cpp
@@ -88,6 +99,7 @@ target_compile_definitions(AuraClean PRIVATE
 
 target_link_libraries(AuraClean
     PRIVATE
+        AuraCleanBinaryData
         juce::juce_core
         juce::juce_events
         juce::juce_data_structures

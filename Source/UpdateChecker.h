@@ -88,6 +88,10 @@ public:
     static juce::String skippedVersion();
     static void         setSkippedVersion (const juce::String& version);
 
+    /** « Rechercher automatiquement au lancement » (activé par défaut). */
+    static bool isAutoCheckEnabled();
+    static void setAutoCheckEnabled (bool enabled);
+
 private:
     void run() override;
 

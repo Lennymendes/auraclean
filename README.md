@@ -7,6 +7,7 @@ Application **Standalone macOS** (JUCE 8, C++20 + Objective-C++), Universal arm6
 ```
 AuraClean/
 ├── CMakeLists.txt            JUCE local (-DAURASUITE_JUCE_DIR=…) ou FetchContent 8.0.4
+├── Resources/                AuraCleanLogo.png (interface), AuraClean-icon.png (icône macOS, grille 824/1024)
 └── Source/
     ├── Main.cpp              JUCEApplication, fenêtre, refus de quitter pendant une opération
     ├── MachOInspector.h      Lecture des 4 premiers Ko : thin / fat / fat64 → ARM64, x86_64…
@@ -15,6 +16,9 @@ AuraClean/
     ├── LeftoverScanner.h/.cpp  Deep Clean : fichiers résiduels + reçus .pkg (lsbom)
     ├── DeepCleanDialog.h/.cpp  Modale arborescente : cases, badges, chemins, tailles, total
     ├── UpdateChecker.h/.cpp    Vérification de mise à jour (thread, JSON, comparaison de versions)
+    ├── SettingsDialog.h/.cpp   Réglages (engrenage, ⌘,) : mises à jour + À propos
+    ├── AuraWidgets.h           IconButton (engrenage, fermer), LogoButton (logo cliquable → site)
+    ├── AppInfo.h               Site, crédits, logo embarqué (BinaryData)
     ├── AuraLookAndFeel.h     Thème #0D0E12, cyan / violet, chips, header de table, scrollbars
     └── MainComponent.h/.cpp  Library (filtres + sélection), VendorSidebar, PluginTable, overlay
 ```
@@ -116,6 +120,14 @@ Le CDN de GitHub met ce fichier en cache quelques minutes après chaque push.
 - **Publier une version** : incrémenter `project(AuraClean VERSION x.y.z)` dans `CMakeLists.txt`, construire,
   puis modifier `latest_version`, `download_url` et `release_notes` dans `version.json` du dépôt
   `auraclean-updates` et pousser.
+
+## Réglages & À propos
+
+- Bouton **engrenage** de l'en-tête, **⌘,** ou menu **AuraClean ▸ Réglages… / À propos d'AuraClean…**.
+- **Mises à jour** : version installée, état en direct (recherche, à jour, disponible, erreur),
+  *Rechercher des mises à jour*, *Télécharger*, interrupteur *Rechercher automatiquement au lancement*.
+- **À propos** : logo (clic → nextdsp.com), version, « Développé avec ♥ par ZEYN », bouton du site.
+- Le **logo de l'en-tête** est aussi un lien vers le site.
 
 ## Ergonomie
 
