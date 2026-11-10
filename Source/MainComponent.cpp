@@ -141,9 +141,8 @@ namespace
             return;
         }
 
-        g.setGradientFill (juce::ColourGradient (Theme::violet, r.getX(), r.getY(),
-                                                 Theme::cyan, r.getRight(), r.getBottom(), false));
-        g.fillRoundedRectangle (r, 4.0f);
+        Theme::fillRoundedRectWithGradient (g, r, 4.0f, juce::ColourGradient (Theme::violet, r.getX(), r.getY(),
+                                                                              Theme::cyan, r.getRight(), r.getBottom(), false));
         g.setColour (juce::Colours::white);
 
         if (state == CheckState::All)
@@ -571,9 +570,9 @@ void VendorSidebar::paintListBoxItem (int row, juce::Graphics& g, int width, int
     {
         g.setColour (Theme::cyan.withAlpha (0.10f));
         g.fillRoundedRectangle (r.toFloat(), 8.0f);
-        g.setGradientFill (juce::ColourGradient (Theme::cyan, 0.0f, (float) r.getY(),
-                                                 Theme::violet, 0.0f, (float) r.getBottom(), false));
-        g.fillRoundedRectangle (r.removeFromLeft (3).toFloat().reduced (0.0f, 8.0f), 1.5f);
+        Theme::fillRoundedRectWithGradient (g, r.removeFromLeft (3).toFloat().reduced (0.0f, 8.0f), 1.5f,
+                                            juce::ColourGradient (Theme::cyan, 0.0f, (float) r.getY(),
+                                                                  Theme::violet, 0.0f, (float) r.getBottom(), false));
     }
 
     auto inner = r.reduced (12, 7);
@@ -1276,8 +1275,9 @@ void BusyOverlay::paint (juce::Graphics& g)
                    .getIntersection (track);
     }
 
-    g.setGradientFill (juce::ColourGradient (Theme::violet, track.getX(), 0.0f, Theme::cyan, track.getRight(), 0.0f, false));
-    g.fillRoundedRectangle (bar, 3.0f);
+    // Barre indéterminée : peut être vide en bout de course → helper sûr (sinon inondation sous CoreGraphics)
+    Theme::fillRoundedRectWithGradient (g, bar, 3.0f, juce::ColourGradient (Theme::violet, track.getX(), 0.0f,
+                                                                            Theme::cyan, track.getRight(), 0.0f, false));
 
     if (value > 0.0f)
     {
@@ -1398,10 +1398,9 @@ void IntroOverlay::paint (juce::Graphics& g)
     g.setColour (Theme::text.withAlpha (content));
     g.drawText (auraText, titleRow.withWidth (auraW + 2.0f), juce::Justification::centredLeft, false);
 
-    const auto cleanArea = titleRow.withTrimmedLeft (auraW + spaceW);
-    g.setGradientFill (juce::ColourGradient (Theme::cyan.withAlpha (content), cleanArea.getX(), 0.0f,
-                                             Theme::violet.withAlpha (content), cleanArea.getX() + cleanW, 0.0f, false));
-    g.drawText (cleanText, cleanArea, juce::Justification::centredLeft, false);
+    Theme::drawGradientText (g, cleanText, titleFont, titleRow.withTrimmedLeft (auraW + spaceW),
+                             juce::Justification::centredLeft,
+                             Theme::cyan.withAlpha (content), Theme::violet.withAlpha (content));
 
     g.setColour (Theme::textFaint.withAlpha (content));
     g.setFont (Theme::font (11.5f, true));
@@ -1415,9 +1414,9 @@ void IntroOverlay::paint (juce::Graphics& g)
     g.fillRoundedRectangle (track, 1.5f);
 
     const auto bar = track.withWidth (juce::jmax (3.0f, track.getWidth() * juce::jlimit (0.0f, 1.0f, shown)));
-    g.setGradientFill (juce::ColourGradient (Theme::cyan.withAlpha (0.85f * content), track.getX(), 0.0f,
-                                             Theme::violet.withAlpha (0.85f * content), track.getRight(), 0.0f, false));
-    g.fillRoundedRectangle (bar, 1.5f);
+    Theme::fillRoundedRectWithGradient (g, bar, 1.5f,
+                                        juce::ColourGradient (Theme::cyan.withAlpha (0.85f * content), track.getX(), 0.0f,
+                                                              Theme::violet.withAlpha (0.85f * content), track.getRight(), 0.0f, false));
 
     // Halo discret en tête de barre
     g.setColour (Theme::cyan.withAlpha (0.18f * content));
@@ -1620,9 +1619,8 @@ void MainComponent::paint (juce::Graphics& g)
     g.setFont (Theme::font (24.0f, true));
     g.setColour (Theme::text);
     g.drawText ("Aura", titleLine, juce::Justification::bottomLeft, false);
-    g.setGradientFill (juce::ColourGradient (Theme::cyan, (float) titleLine.getX() + 58.0f, 0.0f,
-                                             Theme::violet, (float) titleLine.getX() + 130.0f, 0.0f, false));
-    g.drawText ("Clean", titleLine.withTrimmedLeft (57), juce::Justification::bottomLeft, false);
+    Theme::drawGradientText (g, "Clean", Theme::font (24.0f, true), titleLine.withTrimmedLeft (57).toFloat(),
+                             juce::Justification::bottomLeft, Theme::cyan, Theme::violet);
 
     g.setColour (Theme::textFaint);
     g.setFont (Theme::font (12.0f, true));

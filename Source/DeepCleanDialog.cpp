@@ -22,7 +22,8 @@ namespace
     constexpr double kFadeInMs  = 150.0;
     constexpr double kFadeOutMs = 120.0;
 
-    const juce::Colour kVeil        { 0xd007080b };
+    const juce::Colour kVeil        { 0xd807080c };
+    const juce::Colour kTotal       { 0xff22d3ee };
     const juce::Colour kCard        { 0xff11131a };
     const juce::Colour kCardBorder  { 0xff252836 };
     const juce::Colour kGroupRow    { 0xff161922 };
@@ -43,8 +44,7 @@ namespace
             return;
         }
 
-        g.setGradientFill (juce::ColourGradient (Theme::violet.withMultipliedAlpha (alpha), r.getX(), r.getY(),
-                                                 Theme::cyan.withMultipliedAlpha (alpha), r.getRight(), r.getBottom(), false));
+        g.setColour (Theme::violet.withMultipliedAlpha (alpha));  // uni : aucun dégradé dans cette modale
         g.fillRoundedRectangle (r, 4.0f);
         g.setColour (juce::Colours::white.withMultipliedAlpha (alpha));
 
@@ -123,7 +123,7 @@ DeepCleanDialog::DeepCleanDialog (std::vector<CleanGroup> g, juce::String warnin
     addAndMakeVisible (list);
 
     cancelButton.setButtonText (fr ("Annuler"));
-    cancelButton.getProperties().set ("auraStyle", "ghost");
+    cancelButton.getProperties().set ("auraStyle", "secondary");
     cancelButton.onClick = [this] { if (onCancel) onCancel(); };
     addAndMakeVisible (cancelButton);
 
@@ -143,7 +143,7 @@ DeepCleanDialog::DeepCleanDialog (std::vector<CleanGroup> g, juce::String warnin
     addAndMakeVisible (confirmButton);
 
     expandButton.setButtonText (fr ("Tout replier"));
-    expandButton.getProperties().set ("auraStyle", "ghost");
+    expandButton.getProperties().set ("auraStyle", "secondary");
     expandButton.onClick = [this]
     {
         const bool anyExpanded = std::any_of (groups.begin(), groups.end(), [] (const CleanGroup& cg) { return cg.expanded; });
@@ -334,21 +334,23 @@ void DeepCleanDialog::resized()
 
 void DeepCleanDialog::paint (juce::Graphics& g)
 {
-    // Voile sombre : l'interface principale reste visible derrière
+    // IMPORTANT : aucun setGradientFill dans ce composant (voir Theme::fillPathWithGradient).
+
+    // 1. Voile sombre uni : l'interface principale reste visible derrière
     g.fillAll (kVeil);
 
+    // 2. Carte centrale : englobe l'en-tête, la liste ET le pied de page (total + boutons)
     const auto card  = cardBounds();
     const auto cardF = card.toFloat();
 
     juce::Path cardShape;
-    cardShape.addRoundedRectangle (cardF, 14.0f);
-
+    cardShape.addRoundedRectangle (cardF, 12.0f);
     juce::DropShadow (juce::Colours::black.withAlpha (0.55f), 48, { 0, 18 }).drawForPath (g, cardShape);
 
     g.setColour (kCard);
-    g.fillPath (cardShape);
+    g.fillRoundedRectangle (cardF, 12.0f);
     g.setColour (kCardBorder);
-    g.strokePath (cardShape, juce::PathStrokeType (1.0f));
+    g.drawRoundedRectangle (cardF.reduced (0.5f), 12.0f, 1.0f);
 
     // ---- En-tête
     auto header = card.withHeight (kHeaderH).reduced (28, 20);
@@ -395,8 +397,7 @@ void DeepCleanDialog::paint (juce::Graphics& g)
     const auto totalText = formatBytes (totalBytes);
     auto line1 = footer.removeFromTop (32);
 
-    g.setGradientFill (juce::ColourGradient (Theme::cyan, (float) line1.getX(), 0.0f,
-                                             Theme::violet, (float) line1.getX() + 160.0f, 0.0f, false));
+    g.setColour (kTotal);  // cyan uni
     g.setFont (Theme::font (26.0f, true));
     g.drawText (totalText, line1.removeFromLeft (170), juce::Justification::centredLeft, false);
 

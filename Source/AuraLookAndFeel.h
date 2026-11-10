@@ -77,6 +77,55 @@ namespace Theme
     {
         return juce::Font (juce::FontOptions (height, bold ? juce::Font::bold : juce::Font::plain));
     }
+
+    //==========================================================================
+    //  Dégradés : TOUJOURS via ces deux fonctions.
+    //
+    //  Sous macOS (CoreGraphicsContext, JUCE 8), un remplissage non uni est fait en
+    //  découpant (CGContextClip) sur la forme puis en peignant le dégradé SANS bornes.
+    //  Si la forme est vide — un rectangle de largeur nulle, ou le glyphe d'une ESPACE
+    //  dans un drawText() en dégradé — le découpage n'a aucun effet et le dégradé
+    //  inonde tout le composant. D'où ces garde-fous :
+    //    - on refuse les formes vides ;
+    //    - le texte est converti en UN SEUL Path (jamais glyphe par glyphe).
+    //==========================================================================
+    inline void fillPathWithGradient (juce::Graphics& g, const juce::Path& path, const juce::ColourGradient& gradient)
+    {
+        const auto bounds = path.getBounds();
+
+        if (path.isEmpty() || bounds.isEmpty() || ! bounds.isFinite())
+            return;
+
+        juce::Graphics::ScopedSaveState state (g);
+        g.setGradientFill (gradient);
+        g.fillPath (path);
+    }
+
+    inline void fillRoundedRectWithGradient (juce::Graphics& g, juce::Rectangle<float> r, float corner,
+                                             const juce::ColourGradient& gradient)
+    {
+        if (r.getWidth() < 0.5f || r.getHeight() < 0.5f)
+            return;
+
+        juce::Path p;
+        p.addRoundedRectangle (r, juce::jmin (corner, r.getWidth() * 0.5f, r.getHeight() * 0.5f));
+        fillPathWithGradient (g, p, gradient);
+    }
+
+    /** Texte en dégradé horizontal (c1 → c2 sur la largeur réelle du texte), sûr sous CoreGraphics. */
+    inline void drawGradientText (juce::Graphics& g, const juce::String& label, const juce::Font& f,
+                                  juce::Rectangle<float> area, juce::Justification justification,
+                                  juce::Colour c1, juce::Colour c2)
+    {
+        juce::GlyphArrangement glyphs;
+        glyphs.addFittedText (f, label, area.getX(), area.getY(), area.getWidth(), area.getHeight(), justification, 1);
+
+        juce::Path path;
+        glyphs.createPath (path);
+
+        const auto b = path.getBounds();
+        fillPathWithGradient (g, path, juce::ColourGradient (c1, b.getX(), 0.0f, c2, b.getRight(), 0.0f, false));
+    }
 } // namespace Theme
 
 //==============================================================================
@@ -187,6 +236,12 @@ public:
         {
             fill    = juce::Colours::transparentBlack;
             outline = Theme::border;
+        }
+        else if (style == "secondary")
+        {
+            // Bouton secondaire à fond uni, posé sur une carte #11131A
+            fill    = juce::Colour (0xff1a1d27);
+            outline = juce::Colour (0xff2c303d);
         }
 
         if (! button.isEnabled())
