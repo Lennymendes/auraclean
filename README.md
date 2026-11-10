@@ -97,7 +97,9 @@ Signature : Hardened Runtime + `com.apple.security.automation.apple-events`. App
 
 Au lancement (après 1,5 s, en silence) et via **AuraClean ▸ Rechercher des mises à jour…** (ou **Aide**, ou
 **À propos d'AuraClean…**), `UpdateChecker` (un `juce::Thread`) fait un `GET` sur
-`https://nextdsp.com/api/auraclean-version.json` — exemple prêt à héberger : [`docs/auraclean-version.json`](docs/auraclean-version.json).
+`https://raw.githubusercontent.com/Lennymendes/auraclean-updates/main/version.json` (dépôt public
+`Lennymendes/auraclean-updates`) — modèle : [`docs/version.json`](docs/version.json).
+Le CDN de GitHub met ce fichier en cache quelques minutes après chaque push.
 
 ```json
 { "latest_version": "1.0.1", "download_url": "https://nextdsp.com/downloads/AuraClean-1.0.1.dmg",
@@ -109,10 +111,11 @@ Au lancement (après 1,5 s, en silence) et via **AuraClean ▸ Rechercher des mi
   *Plus tard*, *Ignorer cette version* (mémorisé dans `~/Library/Application Support/NextDSP/AuraClean.settings`).
 - Au lancement, aucune erreur réseau n'est affichée ; depuis le menu, « à jour » ou l'erreur s'affiche.
 - Sécurité : HTTPS obligatoire, réponse ≤ 64 Ko, `download_url` limité aux domaines de
-  `UpdateConfig::allowedDownloadHosts()` (par défaut `nextdsp.com` et sous-domaines — ajouter par ex. le domaine
-  de votre boutique si le lien y pointe).
+  `UpdateConfig::allowedDownloadHosts()` : `nextdsp.com`, `lemonsqueezy.com`, `paddle.com`, `github.com`,
+  `raw.githubusercontent.com` (et leurs sous-domaines).
 - **Publier une version** : incrémenter `project(AuraClean VERSION x.y.z)` dans `CMakeLists.txt`, construire,
-  puis mettre à jour le JSON en ligne.
+  puis modifier `latest_version`, `download_url` et `release_notes` dans `version.json` du dépôt
+  `auraclean-updates` et pousser.
 
 ## Ergonomie
 

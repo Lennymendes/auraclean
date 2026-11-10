@@ -3,7 +3,7 @@
 //  UpdateChecker.h — AuraClean (NextDSP)
 //
 //  Vérification de mise à jour silencieuse, sur un thread dédié :
-//    GET https://nextdsp.com/api/auraclean-version.json
+//    GET https://raw.githubusercontent.com/Lennymendes/auraclean-updates/main/version.json
 //    { "latest_version": "1.0.1",
 //      "download_url":   "https://nextdsp.com/downloads/AuraClean-1.0.1.dmg",
 //      "release_notes":  "Correction de bugs" }
@@ -21,13 +21,18 @@ namespace aura
 {
 namespace UpdateConfig
 {
-    /** Flux JSON statique à héberger (voir docs/auraclean-version.json). */
-    inline constexpr const char* feedUrl = "https://nextdsp.com/api/auraclean-version.json";
+    /** Flux JSON statique hébergé sur GitHub (dépôt Lennymendes/auraclean-updates, fichier version.json).
+        Modèle : docs/version.json. */
+    inline constexpr const char* feedUrl = "https://raw.githubusercontent.com/Lennymendes/auraclean-updates/main/version.json";
 
-    /** Domaines acceptés pour download_url (sous-domaines inclus). */
+    /** Domaines acceptés pour download_url (sous-domaines inclus : www.nextdsp.com, *.lemonsqueezy.com…). */
     inline const juce::StringArray& allowedDownloadHosts()
     {
-        static const juce::StringArray hosts { "nextdsp.com" };
+        static const juce::StringArray hosts { "nextdsp.com",
+                                               "lemonsqueezy.com",
+                                               "paddle.com",
+                                               "github.com",
+                                               "raw.githubusercontent.com" };
         return hosts;
     }
 
