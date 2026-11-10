@@ -1289,6 +1289,145 @@ void BusyOverlay::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+//  UpdateBanner
+//==============================================================================
+namespace
+{
+    constexpr double kBannerAnimMs = 220.0;
+    const juce::Colour kBannerBackground { 0xff12151d };
+    const juce::Colour kBannerBorder     { 0xff252836 };
+}
+
+UpdateBanner::UpdateBanner()
+{
+    setVisible (false);
+
+    downloadButton.setButtonText (fr ("Télécharger la mise à jour"));
+    downloadButton.getProperties().set ("auraStyle", "primary");
+    downloadButton.onClick = [this]
+    {
+        if (onDownload)
+            onDownload (info.downloadUrl);
+        hide();
+    };
+
+    laterButton.setButtonText (fr ("Plus tard"));
+    laterButton.getProperties().set ("auraStyle", "secondary");
+    laterButton.onClick = [this] { hide(); };
+
+    skipButton.setButtonText (fr ("Ignorer cette version"));
+    skipButton.getProperties().set ("auraStyle", "ghost");
+    skipButton.onClick = [this]
+    {
+        if (onSkipVersion)
+            onSkipVersion (info.latestVersion);
+        hide();
+    };
+
+    for (auto* b : { &downloadButton, &laterButton, &skipButton })
+        addAndMakeVisible (b);
+}
+
+void UpdateBanner::show (const UpdateInfo& newInfo)
+{
+    info = newInfo;
+    setTooltip (info.releaseNotes.isNotEmpty() ? fr ("Nouveautés :\n") + info.releaseNotes : juce::String());
+    setVisible (true);
+    startValue       = reveal;
+    target           = 1.0f;
+    animationStartMs = juce::Time::getMillisecondCounterHiRes();
+    startTimerHz (60);
+    repaint();
+}
+
+void UpdateBanner::hide()
+{
+    startValue       = reveal;
+    target           = 0.0f;
+    animationStartMs = juce::Time::getMillisecondCounterHiRes();
+    startTimerHz (60);
+}
+
+int UpdateBanner::getCurrentHeight() const noexcept
+{
+    return juce::roundToInt ((float) fullHeight * reveal);
+}
+
+void UpdateBanner::timerCallback()
+{
+    const auto t = (float) ((juce::Time::getMillisecondCounterHiRes() - animationStartMs) / kBannerAnimMs);
+    reveal = startValue + (target - startValue) * easeOutCubic (t);
+
+    if (t >= 1.0f)
+    {
+        reveal = target;
+        stopTimer();
+
+        if (target <= 0.0f)
+            setVisible (false);
+    }
+
+    if (onLayoutChanged)
+        onLayoutChanged();
+}
+
+void UpdateBanner::resized()
+{
+    // Le contenu est calé sur le BAS : il glisse depuis le haut pendant l'animation
+    auto r = juce::Rectangle<int> (0, getHeight() - fullHeight, getWidth(), fullHeight).reduced (20, 13);
+
+    downloadButton.setBounds (r.removeFromRight (230));
+    r.removeFromRight (8);
+    laterButton.setBounds (r.removeFromRight (104));
+    r.removeFromRight (8);
+    skipButton.setBounds (r.removeFromRight (168));
+}
+
+void UpdateBanner::paint (juce::Graphics& g)
+{
+    // Couleurs unies uniquement
+    g.fillAll (kBannerBackground);
+    g.setColour (kBannerBorder);
+    g.fillRect (0, getHeight() - 1, getWidth(), 1);
+
+    const auto content = juce::Rectangle<int> (0, getHeight() - fullHeight, getWidth(), fullHeight);
+
+    g.setColour (Theme::cyan);
+    g.fillRect (content.getX(), content.getY() + 12, 3, fullHeight - 24);
+
+    // Pastille avec flèche de téléchargement
+    const auto badge = juce::Rectangle<float> (22.0f, (float) content.getY() + 15.0f, 28.0f, 28.0f);
+    g.setColour (Theme::cyan.withAlpha (0.14f));
+    g.fillEllipse (badge);
+
+    juce::Path arrow;
+    const auto c = badge.getCentre();
+    arrow.startNewSubPath (c.x, c.y - 6.5f);
+    arrow.lineTo (c.x, c.y + 4.5f);
+    arrow.startNewSubPath (c.x - 4.5f, c.y + 0.5f);
+    arrow.lineTo (c.x, c.y + 5.0f);
+    arrow.lineTo (c.x + 4.5f, c.y + 0.5f);
+    g.setColour (Theme::cyan);
+    g.strokePath (arrow, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    auto text = content.withTrimmedLeft (64).withTrimmedRight (20 + 230 + 8 + 104 + 8 + 168 + 16).reduced (0, 10);
+
+    g.setColour (Theme::text);
+    g.setFont (Theme::font (15.0f, true));
+    g.drawText (fr ("AuraClean ") + info.latestVersion + fr (" est disponible"),
+                text.removeFromTop (text.getHeight() / 2 + 1), juce::Justification::bottomLeft, true);
+
+    auto subtitle = fr ("Vous utilisez la version ") + info.currentVersion;
+
+    if (info.releaseNotes.isNotEmpty())
+        subtitle << fr ("  ·  ") << info.releaseNotes.upToFirstOccurrenceOf ("\n", false, false);
+
+    g.setColour (Theme::textDim);
+    g.setFont (Theme::font (13.0f));
+    g.drawText (subtitle, text, juce::Justification::topLeft, true);
+}
+
+//==============================================================================
 //  IntroOverlay
 //==============================================================================
 namespace
@@ -1547,6 +1686,24 @@ MainComponent::MainComponent()
     intro.onHidden = [this] { introHidden(); };
     addChildComponent (intro);
 
+    // ---- Mises à jour
+    updateBanner.onLayoutChanged = [this] { resized(); };
+    updateBanner.onDownload      = [] (const juce::URL& url)
+    {
+        if (UpdateChecker::isTrustedDownloadUrl (url))
+            url.launchInDefaultBrowser();
+    };
+    updateBanner.onSkipVersion   = [] (const juce::String& version) { UpdateChecker::setSkippedVersion (version); };
+    addChildComponent (updateBanner);
+
+    // Vérification silencieuse peu après le lancement (laisse l'intro se jouer)
+    juce::Component::SafePointer<MainComponent> safeSelf (this);
+    juce::Timer::callAfterDelay (1500, [safeSelf]
+    {
+        if (auto* self = safeSelf.getComponent())
+            self->checkForUpdates (false);
+    });
+
     setWantsKeyboardFocus (true);
     setSize (1380, 840);
     updateButtons();
@@ -1682,6 +1839,14 @@ void MainComponent::resized()
 
     if (deepCleanDialog != nullptr)
         deepCleanDialog->setBounds (area);
+
+    if (closingDialog != nullptr)
+        closingDialog->setBounds (area);
+
+    if (const int bannerHeight = updateBanner.getCurrentHeight(); bannerHeight > 0)
+        updateBanner.setBounds (area.removeFromTop (bannerHeight));
+    else
+        updateBanner.setBounds ({});
 
     headerArea = area.removeFromTop (68);
     bottomArea = area.removeFromBottom (68);
@@ -1904,6 +2069,97 @@ void MainComponent::scanFinished (ScanResult result)
 void MainComponent::introHidden()
 {
     grabKeyboardFocus();
+
+    if (hasPendingUpdate)
+    {
+        hasPendingUpdate = false;
+        updateBanner.show (pendingUpdate);
+    }
+}
+
+//==============================================================================
+//  Mises à jour
+//==============================================================================
+juce::String MainComponent::applicationVersion()
+{
+    if (auto* app = juce::JUCEApplicationBase::getInstance())
+        return app->getApplicationVersion();
+
+    return "0.0.0";
+}
+
+void MainComponent::checkForUpdates (bool userInitiated)
+{
+    if (updateChecker.isChecking())
+        return;
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    updateChecker.check ([safe, userInitiated] (const UpdateInfo& info)
+    {
+        if (auto* self = safe.getComponent())
+            self->handleUpdateResult (info, userInitiated);
+    });
+}
+
+void MainComponent::handleUpdateResult (const UpdateInfo& info, bool userInitiated)
+{
+    using Status = UpdateInfo::Status;
+
+    if (info.status == Status::UpdateAvailable)
+    {
+        // Au lancement, on respecte « Ignorer cette version » ; depuis le menu, on montre toujours.
+        if (! userInitiated && info.latestVersion == UpdateChecker::skippedVersion())
+            return;
+
+        if (intro.isActive())
+        {
+            pendingUpdate    = info;
+            hasPendingUpdate = true;
+        }
+        else
+        {
+            updateBanner.show (info);
+        }
+        return;
+    }
+
+    if (! userInitiated)
+        return;  // vérification silencieuse : ni « à jour » ni erreur réseau à l'écran
+
+    const bool upToDate = info.status == Status::UpToDate;
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (upToDate ? juce::MessageBoxIconType::InfoIcon
+                                                              : juce::MessageBoxIconType::WarningIcon)
+                                      .withTitle (upToDate ? fr ("AuraClean est à jour")
+                                                           : fr ("Vérification impossible"))
+                                      .withMessage (upToDate ? fr ("Vous utilisez la dernière version (") + info.currentVersion + ")."
+                                                             : info.errorMessage)
+                                      .withButton ("OK")
+                                      .withAssociatedComponent (this),
+                                  nullptr);
+}
+
+void MainComponent::showAbout()
+{
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::NoIcon)
+                                      .withTitle ("AuraClean")
+                                      .withMessage (fr ("Version ") + applicationVersion()
+                                                    + fr ("\n\nGestionnaire et désinstalleur de plugins audio\n"
+                                                          "VST3 · Audio Units · AAX\n\n© 2026 NextDSP — AuraSuite"))
+                                      .withButton (fr ("Rechercher des mises à jour"))
+                                      .withButton (fr ("Fermer"))
+                                      .withAssociatedComponent (this),
+                                  [safe] (int result)
+                                  {
+                                      if (result == 1)
+                                          if (auto* self = safe.getComponent())
+                                              self->checkForUpdates (true);
+                                  });
 }
 
 //==============================================================================

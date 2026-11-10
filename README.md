@@ -14,6 +14,7 @@ AuraClean/
     ├── UninstallerMac.h/.mm  Corbeille / quarantaine, élévation groupée, garde-fous de chemins
     ├── LeftoverScanner.h/.cpp  Deep Clean : fichiers résiduels + reçus .pkg (lsbom)
     ├── DeepCleanDialog.h/.cpp  Modale arborescente : cases, badges, chemins, tailles, total
+    ├── UpdateChecker.h/.cpp    Vérification de mise à jour (thread, JSON, comparaison de versions)
     ├── AuraLookAndFeel.h     Thème #0D0E12, cyan / violet, chips, header de table, scrollbars
     └── MainComponent.h/.cpp  Library (filtres + sélection), VendorSidebar, PluginTable, overlay
 ```
@@ -91,6 +92,27 @@ cmake --build build --config Release
 
 Signature : Hardened Runtime + `com.apple.security.automation.apple-events`. App **non sandboxée**
 (obligatoire pour écrire dans `/Library/Audio/Plug-Ins`). Distribution hors App Store, notarisation Developer ID.
+
+## Mises à jour
+
+Au lancement (après 1,5 s, en silence) et via **AuraClean ▸ Rechercher des mises à jour…** (ou **Aide**, ou
+**À propos d'AuraClean…**), `UpdateChecker` (un `juce::Thread`) fait un `GET` sur
+`https://nextdsp.com/api/auraclean-version.json` — exemple prêt à héberger : [`docs/auraclean-version.json`](docs/auraclean-version.json).
+
+```json
+{ "latest_version": "1.0.1", "download_url": "https://nextdsp.com/downloads/AuraClean-1.0.1.dmg",
+  "release_notes": "Correction de bugs" }
+```
+
+- Comparaison SemVer avec la version de l'app (`1.0.1 > 1.0.0`, `1.10 > 1.9`, `1.1.0-beta.2 < 1.1.0`).
+- Nouvelle version → bannière en haut de la fenêtre : *Télécharger la mise à jour* (navigateur),
+  *Plus tard*, *Ignorer cette version* (mémorisé dans `~/Library/Application Support/NextDSP/AuraClean.settings`).
+- Au lancement, aucune erreur réseau n'est affichée ; depuis le menu, « à jour » ou l'erreur s'affiche.
+- Sécurité : HTTPS obligatoire, réponse ≤ 64 Ko, `download_url` limité aux domaines de
+  `UpdateConfig::allowedDownloadHosts()` (par défaut `nextdsp.com` et sous-domaines — ajouter par ex. le domaine
+  de votre boutique si le lien y pointe).
+- **Publier une version** : incrémenter `project(AuraClean VERSION x.y.z)` dans `CMakeLists.txt`, construire,
+  puis mettre à jour le JSON en ligne.
 
 ## Ergonomie
 

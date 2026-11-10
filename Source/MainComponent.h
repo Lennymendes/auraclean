@@ -22,6 +22,7 @@
 #include "LeftoverScanner.h"
 #include "PluginScanner.h"
 #include "UninstallerMac.h"
+#include "UpdateChecker.h"
 
 namespace aura
 {
@@ -265,6 +266,39 @@ private:
 };
 
 //==============================================================================
+/** Bannière « nouvelle version » en haut de la fenêtre (glisse depuis le haut en 220 ms).
+    Couleurs unies uniquement (cf. Theme::fillPathWithGradient). */
+class UpdateBanner : public juce::Component,
+                     public juce::SettableTooltipClient,
+                     private juce::Timer
+{
+public:
+    static constexpr int fullHeight = 58;
+
+    UpdateBanner();
+
+    void show (const UpdateInfo&);
+    void hide();
+    int  getCurrentHeight() const noexcept;
+    bool isShowingOrAnimating() const noexcept { return target > 0.0f || reveal > 0.0f; }
+
+    std::function<void()>                         onLayoutChanged;
+    std::function<void (const juce::URL&)>        onDownload;
+    std::function<void (const juce::String& ver)> onSkipVersion;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    void timerCallback() override;
+
+    UpdateInfo       info;
+    float            reveal = 0.0f, target = 0.0f, startValue = 0.0f;
+    double           animationStartMs = 0.0;
+    juce::TextButton downloadButton, laterButton, skipButton;
+};
+
+//==============================================================================
 class MainComponent : public juce::Component
 {
 public:
@@ -277,6 +311,12 @@ public:
 
     /** Refuse la fermeture pendant une opération sur disque. */
     bool canQuit();
+
+    /** Vérification de mise à jour. userInitiated = depuis le menu : affiche aussi « à jour » / erreurs. */
+    void checkForUpdates (bool userInitiated);
+    void showAbout();
+
+    static juce::String applicationVersion();
 
 private:
     enum class Operation { Uninstall, Disable, Enable };
@@ -325,6 +365,13 @@ private:
     // Barre inférieure
     juce::TextButton enableButton, disableButton, uninstallButton;
     SelectionSummary summary;
+
+    UpdateChecker                    updateChecker { applicationVersion() };
+    UpdateBanner                     updateBanner;
+    UpdateInfo                       pendingUpdate;
+    bool                             hasPendingUpdate = false;
+
+    void handleUpdateResult (const UpdateInfo&, bool userInitiated);
 
     BusyOverlay                      overlay;
     IntroOverlay                     intro;

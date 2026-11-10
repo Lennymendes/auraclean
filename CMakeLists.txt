@@ -72,6 +72,8 @@ target_sources(AuraClean PRIVATE
     Source/PluginScanner.h
     Source/MachOInspector.h
     Source/UninstallerMac.h
+    Source/UpdateChecker.cpp
+    Source/UpdateChecker.h
     Source/UninstallerMac.mm)
 
 # Seul fichier ObjC++ de l'app : ARC activé (les modules JUCE restent en MRC)
