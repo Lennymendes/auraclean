@@ -78,6 +78,10 @@ target_sources(AuraClean PRIVATE
     Source/DeepCleanDialog.cpp
     Source/DeepCleanDialog.h
     Source/LeftoverScanner.cpp
+    Source/LicenseDialog.cpp
+    Source/LicenseDialog.h
+    Source/LicenseManager.cpp
+    Source/LicenseManager.h
     Source/LeftoverScanner.h
     Source/PluginScanner.cpp
     Source/PluginScanner.h
@@ -101,6 +105,7 @@ target_link_libraries(AuraClean
     PRIVATE
         AuraCleanBinaryData
         juce::juce_core
+        juce::juce_cryptography
         juce::juce_events
         juce::juce_data_structures
         juce::juce_graphics
@@ -108,6 +113,7 @@ target_link_libraries(AuraClean
         "-framework CoreFoundation"
         "-framework Foundation"
         "-framework AppKit"
+        "-framework IOKit"
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

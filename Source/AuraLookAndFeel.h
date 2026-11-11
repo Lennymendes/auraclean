@@ -237,6 +237,22 @@ public:
             fill    = juce::Colours::transparentBlack;
             outline = Theme::border;
         }
+        else if (style == "tab")
+        {
+            // Onglet d'un contrôle segmenté : seul l'onglet actif a un fond
+            const bool on = button.getToggleState();
+            fill    = on ? Theme::raised : juce::Colours::transparentBlack;
+            outline = on ? juce::Colour (0xff2c303d) : juce::Colours::transparentBlack;
+
+            if (! on && isHighlighted)
+                fill = Theme::raised.withAlpha (0.45f);
+
+            g.setColour (fill);
+            g.fillRoundedRectangle (bounds, 6.0f);
+            g.setColour (outline);
+            g.drawRoundedRectangle (bounds, 6.0f, 1.0f);
+            return;
+        }
         else if (style == "secondary")
         {
             // Bouton secondaire à fond uni, posé sur une carte #11131A
@@ -279,6 +295,8 @@ public:
             colour = juce::Colours::white;
         else if (style == "chip")
             colour = button.getToggleState() ? accentOf (button) : Theme::textDim;
+        else if (style == "tab")
+            colour = button.getToggleState() ? Theme::text : Theme::textDim;
 
         if (! button.isEnabled())
             colour = colour.withMultipliedAlpha (0.4f);

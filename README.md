@@ -16,7 +16,9 @@ AuraClean/
     ├── LeftoverScanner.h/.cpp  Deep Clean : fichiers résiduels + reçus .pkg (lsbom)
     ├── DeepCleanDialog.h/.cpp  Modale arborescente : cases, badges, chemins, tailles, total
     ├── UpdateChecker.h/.cpp    Vérification de mise à jour (thread, JSON, comparaison de versions)
-    ├── SettingsDialog.h/.cpp   Réglages (engrenage, ⌘,) : mises à jour + À propos
+    ├── SettingsDialog.h/.cpp   Réglages (engrenage, ⌘,) : onglets Licence / Mises à jour / À propos
+    ├── LicenseManager.h/.cpp   Licence Lemon Squeezy (activation, désactivation, fichier signé hors-ligne)
+    ├── LicenseDialog.h/.cpp    Modale « Activer AuraClean »
     ├── AuraWidgets.h           IconButton (engrenage, fermer), LogoButton (logo cliquable → site)
     ├── AppInfo.h               Site, crédits, logo embarqué (BinaryData)
     ├── AuraLookAndFeel.h     Thème #0D0E12, cyan / violet, chips, header de table, scrollbars
@@ -121,9 +123,27 @@ Le CDN de GitHub met ce fichier en cache quelques minutes après chaque push.
   puis modifier `latest_version`, `download_url` et `release_notes` dans `version.json` du dépôt
   `auraclean-updates` et pousser.
 
+## Licence (Lemon Squeezy) — « Scan gratuit / Nettoyage sous licence »
+
+- **Mode Aperçu** (sans licence) : scan, filtres, recherche, sélection et modale *Prévisualisation de
+  désinstallation* (fichiers résiduels + espace récupérable). Le bouton final (Corbeille, Désactiver,
+  Réactiver) ouvre **Activer AuraClean** ; après activation, l'action demandée repart automatiquement.
+- **Activation** : `POST https://api.lemonsqueezy.com/v1/licenses/activate` (`license_key`, `instance_name` =
+  nom du Mac), sur un thread dédié. Acceptée seulement si `activated == true`, statut ni `expired` ni `disabled`,
+  **et** `meta.product_name` contient « AuraClean » (une clé d'un autre produit est refusée et son emplacement
+  aussitôt libéré). Messages FR : clé introuvable, expirée, désactivée, autre produit, limite de 3 Mac, réseau.
+- **Hors-ligne** : `~/Library/Application Support/NextDSP/AuraClean/license.dat` (clé, `instance.id`,
+  `meta.product_id`) signé SHA-256 avec l'`IOPlatformUUID` du Mac (IOKit) + sel interne. Vérifié localement à
+  chaque lancement ; copié sur un autre Mac ou modifié → refusé.
+- **Désactiver ce Mac** (Réglages ▸ Licence) : `POST /v1/licenses/deactivate` (`license_key`, `instance_id`)
+  puis suppression du fichier local.
+- Configuration : `LicenseConfig` dans `LicenseManager.h` (Checkout URL, prix affiché, nom de produit attendu).
+
 ## Réglages & À propos
 
 - Bouton **engrenage** de l'en-tête, **⌘,** ou menu **AuraClean ▸ Réglages… / À propos d'AuraClean…**.
+- **Licence** : Mode Aperçu (*Activer une licence…*, *Acheter (14,99 €)*) ou badge *Licence Active*, clé masquée
+  `XXXX-••••-••••-XXXX`, *Désactiver ce Mac*.
 - **Mises à jour** : version installée, état en direct (recherche, à jour, disponible, erreur),
   *Rechercher des mises à jour*, *Télécharger*, interrupteur *Rechercher automatiquement au lancement*.
 - **À propos** : logo (clic → nextdsp.com), version, « Développé avec ♥ par ZEYN », bouton du site.

@@ -52,6 +52,10 @@ public:
     DeepCleanDialog (std::vector<CleanGroup> groups, juce::String warning, bool leftoversSearched);
     ~DeepCleanDialog() override;
 
+    /** Mode Aperçu (pas de licence) : titre « Prévisualisation de désinstallation » + mention dans le pied.
+        Le bouton final reste cliquable : MainComponent intercepte alors l'action et propose l'activation. */
+    void setPreviewMode (bool shouldBePreview);
+
     /** Fondu de sortie (120 ms) puis appel de onDone. Les clics sont ignorés pendant l'animation. */
     void dismiss (std::function<void()> onDone);
 
@@ -90,6 +94,7 @@ private:
     std::vector<RowRef>     rows;
     juce::String            warning;
     bool                    searched;
+    bool                    previewMode = false;
 
     juce::ListBox    list;
     juce::TextButton cancelButton, confirmButton, expandButton;

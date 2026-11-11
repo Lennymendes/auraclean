@@ -21,60 +21,133 @@ namespace
     const juce::Colour kCardBorder { 0xff252836 };
     const juce::Colour kInset      { 0xff161922 };
 
-    constexpr int kCardW   = 620;
-    constexpr int kCardH   = 540;
-    constexpr int kPad     = 32;
-    constexpr int kLogo    = 96;
+    constexpr int kCardW  = 640;
+    constexpr int kCardH  = 430;
+    constexpr int kPad    = 32;
+    constexpr int kLogo   = 96;
+    constexpr int kTabW   = 156;
 
     float easeOut (float t) { t = juce::jlimit (0.0f, 1.0f, t); return 1.0f - std::pow (1.0f - t, 3.0f); }
 
-    /** Toute la géométrie de la carte, partagée par paint() et resized(). */
+    /** Géométrie commune de la carte, partagée par paint() et resized(). */
     struct Layout
     {
-        juce::Rectangle<int> card, header, updatesLabel, status, buttons, toggle, aboutLabel, about, logo, aboutText, copyright;
-        int dividerY1 = 0, dividerY2 = 0;
+        juce::Rectangle<int> card, header, tabs, content, copyright;
+        int dividerY = 0;
 
         explicit Layout (juce::Rectangle<int> c) : card (c)
         {
             auto r = c.reduced (kPad, 0);
-            header = r.removeFromTop (68);
-            dividerY1 = r.getY();
-
+            header    = r.removeFromTop (68);
+            dividerY  = r.getY();
             r.removeFromTop (18);
-            updatesLabel = r.removeFromTop (22);
-            r.removeFromTop (6);
-            status = r.removeFromTop (64);
-            r.removeFromTop (14);
-            buttons = r.removeFromTop (36);
-            r.removeFromTop (12);
-            toggle = r.removeFromTop (30);
-            r.removeFromTop (20);
-            dividerY2 = r.getY();
-
-            r.removeFromTop (18);
-            aboutLabel = r.removeFromTop (22);
-            r.removeFromTop (10);
-            about = r.removeFromTop (kLogo + 8);
-            logo = about.withWidth (kLogo).withHeight (kLogo).withY (about.getY() + 4);
-            aboutText = about.withTrimmedLeft (kLogo + 22);
+            tabs      = r.removeFromTop (36).withWidth (kTabW * 3 + 8);
+            r.removeFromTop (22);
             copyright = c.withTop (c.getBottom() - 40).reduced (kPad, 0);
+            content   = r.withBottom (copyright.getY() - 4);
         }
     };
+
+    struct LicenseLayout
+    {
+        juce::Rectangle<int> label, status, buttons, message;
+
+        explicit LicenseLayout (juce::Rectangle<int> r)
+        {
+            label   = r.removeFromTop (22);  r.removeFromTop (6);
+            status  = r.removeFromTop (88);  r.removeFromTop (16);
+            buttons = r.removeFromTop (36);  r.removeFromTop (12);
+            message = r.removeFromTop (40);
+        }
+    };
+
+    struct UpdatesLayout
+    {
+        juce::Rectangle<int> label, status, buttons, toggle;
+
+        explicit UpdatesLayout (juce::Rectangle<int> r)
+        {
+            label   = r.removeFromTop (22);  r.removeFromTop (6);
+            status  = r.removeFromTop (64);  r.removeFromTop (14);
+            buttons = r.removeFromTop (36);  r.removeFromTop (14);
+            toggle  = r.removeFromTop (30);
+        }
+    };
+
+    struct AboutLayout
+    {
+        juce::Rectangle<int> label, logo, text;
+
+        explicit AboutLayout (juce::Rectangle<int> r)
+        {
+            label = r.removeFromTop (22);  r.removeFromTop (12);
+            auto block = r.removeFromTop (kLogo + 16);
+            logo  = block.withWidth (kLogo).withHeight (kLogo).withY (block.getY() + 4);
+            text  = block.withTrimmedLeft (kLogo + 22);
+        }
+    };
+
+    void drawInset (juce::Graphics& g, juce::Rectangle<int> r)
+    {
+        g.setColour (kInset);
+        g.fillRoundedRectangle (r.toFloat(), 9.0f);
+        g.setColour (kCardBorder);
+        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 9.0f, 1.0f);
+    }
+
+    void drawSectionLabel (juce::Graphics& g, const juce::String& label, juce::Rectangle<int> r)
+    {
+        g.setColour (Theme::textDim);
+        g.setFont (Theme::font (12.0f, true));
+        g.drawText (label, r, juce::Justification::centredLeft, false);
+    }
 } // namespace
 
 //==============================================================================
-SettingsDialog::SettingsDialog (juce::Image logoImage, juce::String currentVersion, bool autoCheckEnabled)
-    : logo (std::move (logoImage)), version (std::move (currentVersion))
+SettingsDialog::SettingsDialog (juce::Image logoImage, juce::String currentVersion, bool autoCheckEnabled,
+                                LicenseManager& manager, Tab initialTab)
+    : logo (std::move (logoImage)), version (std::move (currentVersion)), license (manager), tab (initialTab)
 {
     lastInfo.currentVersion = version;
 
     closeButton.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible (closeButton);
 
+    const char* tabNames[] = { "Licence", "Mises à jour", "À propos" };
+
+    for (int i = 0; i < 3; ++i)
+    {
+        auto& b = tabButtons[(size_t) i];
+        b.setButtonText (txt (tabNames[i]));
+        b.getProperties().set ("auraStyle", "tab");
+        b.setClickingTogglesState (true);
+        b.setRadioGroupId (4242);
+        b.onClick = [this, i] { selectTab ((Tab) i); };
+        addAndMakeVisible (b);
+    }
+
+    // ---- Licence
+    activateButton.setButtonText (txt ("Activer une licence…"));
+    activateButton.getProperties().set ("auraStyle", "primary");
+    activateButton.onClick = [this] { if (onActivateLicense) onActivateLicense(); };
+    addChildComponent (activateButton);
+
+    buyButton.setButtonText (txt ("Acheter (") + LicenseConfig::priceLabel + ")");
+    buyButton.getProperties().set ("auraStyle", "secondary");
+    buyButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    buyButton.onClick = [] { LicenseConfig::openCheckout(); };
+    addChildComponent (buyButton);
+
+    deactivateButton.setButtonText (txt ("Désactiver ce Mac"));
+    deactivateButton.getProperties().set ("auraStyle", "secondary");
+    deactivateButton.onClick = [this] { confirmDeactivation(); };
+    addChildComponent (deactivateButton);
+
+    // ---- Mises à jour
     checkButton.setButtonText (txt ("Rechercher des mises à jour"));
     checkButton.getProperties().set ("auraStyle", "secondary");
     checkButton.onClick = [this] { if (onCheckForUpdates) onCheckForUpdates(); };
-    addAndMakeVisible (checkButton);
+    addChildComponent (checkButton);
 
     downloadButton.getProperties().set ("auraStyle", "primary");
     downloadButton.onClick = [this]
@@ -87,13 +160,16 @@ SettingsDialog::SettingsDialog (juce::Image logoImage, juce::String currentVersi
     autoCheckToggle.setButtonText (txt ("Rechercher automatiquement au lancement"));
     autoCheckToggle.setToggleState (autoCheckEnabled, juce::dontSendNotification);
     autoCheckToggle.onClick = [this] { if (onAutoCheckChanged) onAutoCheckChanged (autoCheckToggle.getToggleState()); };
-    addAndMakeVisible (autoCheckToggle);
+    addChildComponent (autoCheckToggle);
 
+    // ---- À propos
     websiteButton.setButtonText (txt ("Visiter ") + AppInfo::websiteLabel);
     websiteButton.getProperties().set ("auraStyle", "secondary");
     websiteButton.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     websiteButton.onClick = [] { AppInfo::openWebsite(); };
-    addAndMakeVisible (websiteButton);
+    addChildComponent (websiteButton);
+
+    selectTab (initialTab);
 
     setWantsKeyboardFocus (true);
     setAlpha (0.0f);
@@ -107,12 +183,86 @@ SettingsDialog::~SettingsDialog()
 }
 
 //==============================================================================
+void SettingsDialog::selectTab (Tab newTab)
+{
+    tab = newTab;
+    tabButtons[(size_t) tab].setToggleState (true, juce::dontSendNotification);
+    logoHovered = false;
+    updateVisibility();
+    repaint();
+}
+
+void SettingsDialog::updateVisibility()
+{
+    const bool lic    = tab == Tab::License;
+    const bool upd    = tab == Tab::Updates;
+    const bool abt    = tab == Tab::About;
+    const bool active = license.isActivated();
+
+    activateButton.setVisible (lic && ! active);
+    buyButton.setVisible (lic && ! active);
+    deactivateButton.setVisible (lic && active);
+    deactivateButton.setEnabled (! deactivating);
+    deactivateButton.setButtonText (deactivating ? txt ("Désactivation…") : txt ("Désactiver ce Mac"));
+
+    checkButton.setVisible (upd);
+    checkButton.setEnabled (state != UpdateState::Checking);
+    downloadButton.setVisible (upd && state == UpdateState::Available);
+    autoCheckToggle.setVisible (upd);
+
+    websiteButton.setVisible (abt);
+}
+
+void SettingsDialog::refreshLicense()
+{
+    updateVisibility();
+    repaint();
+}
+
+void SettingsDialog::confirmDeactivation()
+{
+    if (deactivating || ! license.isActivated())
+        return;
+
+    juce::Component::SafePointer<SettingsDialog> safe (this);
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle (txt ("Désactiver AuraClean sur ce Mac ?"))
+                                      .withMessage (txt ("La licence sera libérée sur ce Mac : vous pourrez l'activer sur un autre ordinateur. "
+                                                         "AuraClean repassera en Mode Aperçu (scan uniquement) ici."))
+                                      .withButton (txt ("Désactiver ce Mac"))
+                                      .withButton (txt ("Annuler"))
+                                      .withAssociatedComponent (this),
+                                  [safe] (int result)
+                                  {
+                                      auto* self = safe.getComponent();
+
+                                      if (self == nullptr || result != 1)
+                                          return;
+
+                                      self->deactivating   = true;
+                                      self->licenseMessage = {};
+                                      self->refreshLicense();
+
+                                      self->license.deactivate ([safe] (const LicenseResult& r)
+                                      {
+                                          if (auto* s = safe.getComponent())
+                                          {
+                                              s->deactivating         = false;
+                                              s->licenseMessage       = r.message;
+                                              s->licenseMessageColour = r.ok() ? Theme::success : Theme::warning;
+                                              s->refreshLicense();
+                                          }
+                                      });
+                                  });
+}
+
+//==============================================================================
 void SettingsDialog::setChecking()
 {
     state = UpdateState::Checking;
-    checkButton.setEnabled (false);
-    layoutUpdateButtons();
-    repaint();
+    selectTab (Tab::Updates);
 }
 
 void SettingsDialog::showUpdateResult (const UpdateInfo& info)
@@ -121,21 +271,9 @@ void SettingsDialog::showUpdateResult (const UpdateInfo& info)
     state = info.status == UpdateInfo::Status::UpdateAvailable ? UpdateState::Available
           : info.status == UpdateInfo::Status::UpToDate        ? UpdateState::UpToDate
                                                                : UpdateState::Error;
-    checkButton.setEnabled (true);
     downloadButton.setButtonText (txt ("Télécharger la ") + info.latestVersion);
-    layoutUpdateButtons();
+    updateVisibility();
     repaint();
-}
-
-void SettingsDialog::layoutUpdateButtons()
-{
-    const Layout l (cardBounds());
-    auto row = l.buttons;
-
-    checkButton.setBounds (row.removeFromLeft (250));
-    row.removeFromLeft (10);
-    downloadButton.setBounds (row.removeFromLeft (210));
-    downloadButton.setVisible (state == UpdateState::Available);
 }
 
 //==============================================================================
@@ -189,7 +327,7 @@ juce::Rectangle<int> SettingsDialog::cardBounds() const
 
 juce::Rectangle<int> SettingsDialog::logoBounds() const
 {
-    return Layout (cardBounds()).logo;
+    return tab == Tab::About ? AboutLayout (Layout (cardBounds()).content).logo : juce::Rectangle<int>();
 }
 
 void SettingsDialog::resized()
@@ -198,11 +336,33 @@ void SettingsDialog::resized()
 
     auto header = l.header;
     closeButton.setBounds (header.removeFromRight (34).withSizeKeepingCentre (34, 34));
-    layoutUpdateButtons();
-    autoCheckToggle.setBounds (l.toggle);
 
-    auto text = l.aboutText;
-    websiteButton.setBounds (text.removeFromBottom (32).withWidth (190));
+    auto tabs = l.tabs.reduced (4);
+    for (auto& b : tabButtons)
+        b.setBounds (tabs.removeFromLeft (kTabW));
+
+    {
+        const LicenseLayout ll (l.content);
+        auto row = ll.buttons;
+        activateButton.setBounds (row.removeFromLeft (220));
+        row.removeFromLeft (10);
+        buyButton.setBounds (row.removeFromLeft (190));
+        deactivateButton.setBounds (ll.buttons.withWidth (200));
+    }
+
+    {
+        const UpdatesLayout ul (l.content);
+        auto row = ul.buttons;
+        checkButton.setBounds (row.removeFromLeft (250));
+        row.removeFromLeft (10);
+        downloadButton.setBounds (row.removeFromLeft (210));
+        autoCheckToggle.setBounds (ul.toggle);
+    }
+
+    {
+        const AboutLayout al (l.content);
+        websiteButton.setBounds (al.text.withTop (al.text.getBottom() - 34).withWidth (190));
+    }
 }
 
 void SettingsDialog::paint (juce::Graphics& g)
@@ -234,18 +394,110 @@ void SettingsDialog::paint (juce::Graphics& g)
     g.drawText (txt ("Réglages"), header, juce::Justification::centredLeft, false);
 
     g.setColour (kCardBorder);
-    g.fillRect (l.card.getX() + 1, l.dividerY1, l.card.getWidth() - 2, 1);
-    g.fillRect (l.card.getX() + kPad, l.dividerY2, l.card.getWidth() - 2 * kPad, 1);
+    g.fillRect (l.card.getX() + 1, l.dividerY, l.card.getWidth() - 2, 1);
 
-    // ---- Section « Mises à jour »
-    g.setColour (Theme::textDim);
-    g.setFont (Theme::font (12.0f, true));
-    g.drawText (txt ("MISES À JOUR"), l.updatesLabel, juce::Justification::centredLeft, false);
+    // ---- Onglets : fond segmenté
+    drawInset (g, l.tabs);
 
-    g.setColour (kInset);
-    g.fillRoundedRectangle (l.status.toFloat(), 9.0f);
-    g.setColour (kCardBorder);
-    g.drawRoundedRectangle (l.status.toFloat().reduced (0.5f), 9.0f, 1.0f);
+    switch (tab)
+    {
+        case Tab::License: paintLicenseTab (g, l.content); break;
+        case Tab::Updates: paintUpdatesTab (g, l.content); break;
+        case Tab::About:   paintAboutTab (g, l.content);   break;
+    }
+
+    g.setColour (Theme::textFaint);
+    g.setFont (Theme::font (12.0f));
+    g.drawText (txt (AppInfo::copyrightLine), l.copyright, juce::Justification::centred, false);
+}
+
+//==============================================================================
+void SettingsDialog::paintLicenseTab (juce::Graphics& g, juce::Rectangle<int> content)
+{
+    const LicenseLayout ll (content);
+    drawSectionLabel (g, txt ("LICENCE"), ll.label);
+    drawInset (g, ll.status);
+
+    auto inner = ll.status.reduced (18, 14);
+
+    if (license.isActivated())
+    {
+        // Badge vert « Licence Active »
+        const auto badge = inner.removeFromTop (22).withWidth (132).toFloat();
+        g.setColour (Theme::success.withAlpha (0.14f));
+        g.fillRoundedRectangle (badge, 11.0f);
+        g.setColour (Theme::success.withAlpha (0.7f));
+        g.drawRoundedRectangle (badge.reduced (0.5f), 11.0f, 1.0f);
+        g.setColour (Theme::success);
+        g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ badge.getX() + 14.0f, badge.getCentreY() }));
+        g.setFont (Theme::font (11.5f, true));
+        g.drawText (txt ("LICENCE ACTIVE"), badge.withTrimmedLeft (24.0f), juce::Justification::centredLeft, false);
+
+        inner.removeFromTop (8);
+        const auto& lic = license.current();
+
+        g.setColour (Theme::text);
+        g.setFont (Theme::font (15.0f, true));
+        g.drawText (txt ("Clé : ") + license.maskedKey(), inner.removeFromTop (22), juce::Justification::centredLeft, true);
+
+        auto details = txt ("Ce Mac : ") + (lic.instanceName.isNotEmpty() ? lic.instanceName : LicenseManager::instanceName());
+        const auto when = juce::Time::fromISO8601 (lic.activatedAt);
+
+        if (when.toMilliseconds() > 0)
+            details << txt ("  ·  activée le ") << when.formatted ("%d/%m/%Y");
+
+        g.setColour (Theme::textDim);
+        g.setFont (Theme::font (13.0f));
+        g.drawText (details, inner, juce::Justification::centredLeft, true);
+    }
+    else
+    {
+        const auto dot = inner.removeFromLeft (10).toFloat().withSizeKeepingCentre (8.0f, 8.0f).withY ((float) inner.getY() + 8.0f);
+        g.setColour (Theme::violet);
+        g.fillEllipse (dot);
+        inner.removeFromLeft (12);
+
+        g.setColour (Theme::text);
+        g.setFont (Theme::font (15.0f, true));
+        g.drawText (txt ("Mode Aperçu (Scan uniquement)"), inner.removeFromTop (24), juce::Justification::centredLeft, true);
+
+        g.setColour (Theme::textDim);
+        g.setFont (Theme::font (13.0f));
+        g.drawFittedText (txt ("Scan, filtres et prévisualisation des fichiers résiduels gratuits. "
+                               "La désinstallation Deep Clean et la quarantaine nécessitent une licence."),
+                          inner, juce::Justification::topLeft, 2, 1.0f);
+    }
+
+    // Message : résultat d'une désactivation, fichier refusé, ou aide
+    auto message = licenseMessage;
+    auto colour  = licenseMessageColour;
+
+    if (message.isEmpty() && license.loadProblem().isNotEmpty() && ! license.isActivated())
+    {
+        message = license.loadProblem();
+        colour  = Theme::warning;
+    }
+
+    if (message.isEmpty())
+    {
+        message = license.isActivated()
+                    ? txt ("Désactiver ce Mac libère l'un de vos ") + juce::String (LicenseConfig::maxMachines)
+                          + txt (" emplacements, pour utiliser AuraClean sur un autre ordinateur.")
+                    : txt ("Licence perpétuelle — ") + juce::String (LicenseConfig::maxMachines)
+                          + txt (" Macs inclus, fonctionne hors-ligne après activation.");
+        colour = Theme::textFaint;
+    }
+
+    g.setColour (colour);
+    g.setFont (Theme::font (13.0f));
+    g.drawFittedText (message, ll.message, juce::Justification::topLeft, 2, 1.0f);
+}
+
+void SettingsDialog::paintUpdatesTab (juce::Graphics& g, juce::Rectangle<int> content)
+{
+    const UpdatesLayout ul (content);
+    drawSectionLabel (g, txt ("MISES À JOUR"), ul.label);
+    drawInset (g, ul.status);
 
     juce::String title, detail;
     juce::Colour dot = Theme::textFaint;
@@ -279,25 +531,25 @@ void SettingsDialog::paint (juce::Graphics& g)
             break;
     }
 
-    auto statusInner = l.status.reduced (18, 12);
-    const auto dotArea = statusInner.removeFromLeft (10).toFloat().withSizeKeepingCentre (8.0f, 8.0f).translated (0.0f, -9.0f);
+    auto inner = ul.status.reduced (18, 12);
     g.setColour (dot);
-    g.fillEllipse (dotArea);
-    statusInner.removeFromLeft (12);
+    g.fillEllipse (inner.removeFromLeft (10).toFloat().withSizeKeepingCentre (8.0f, 8.0f).translated (0.0f, -9.0f));
+    inner.removeFromLeft (12);
 
     g.setColour (Theme::text);
     g.setFont (Theme::font (15.0f, true));
-    g.drawText (title, statusInner.removeFromTop (statusInner.getHeight() / 2), juce::Justification::centredLeft, true);
+    g.drawText (title, inner.removeFromTop (inner.getHeight() / 2), juce::Justification::centredLeft, true);
     g.setColour (Theme::textDim);
     g.setFont (Theme::font (13.0f));
-    g.drawText (detail, statusInner, juce::Justification::centredLeft, true);
+    g.drawText (detail, inner, juce::Justification::centredLeft, true);
+}
 
-    // ---- Section « À propos »
-    g.setColour (Theme::textDim);
-    g.setFont (Theme::font (12.0f, true));
-    g.drawText (txt ("À PROPOS"), l.aboutLabel, juce::Justification::centredLeft, false);
+void SettingsDialog::paintAboutTab (juce::Graphics& g, juce::Rectangle<int> content)
+{
+    const AboutLayout al (content);
+    drawSectionLabel (g, txt ("À PROPOS"), al.label);
 
-    const auto logoF = l.logo.toFloat();
+    const auto logoF = al.logo.toFloat();
 
     if (logoHovered)
     {
@@ -308,8 +560,8 @@ void SettingsDialog::paint (juce::Graphics& g)
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImage (logo, logoF, juce::RectanglePlacement::centred);
 
-    auto text = l.aboutText;
-    text.removeFromBottom (32);  // bouton du site
+    auto text = al.text;
+    text.removeFromBottom (34);  // bouton du site
 
     const auto titleFont = Theme::font (26.0f, true);
     const auto titleRow  = text.removeFromTop (32).toFloat();
@@ -336,17 +588,11 @@ void SettingsDialog::paint (juce::Graphics& g)
     const float beforeW = juce::GlyphArrangement::getStringWidth (creditFont, before);
     g.drawText (before, credit, juce::Justification::centredLeft, false);
 
-    const auto heartArea = juce::Rectangle<float> (credit.getX() + beforeW + 1.0f, credit.getCentreY() - 6.0f, 14.0f, 12.0f);
     g.setColour (Theme::violet);
-    g.fillPath (Icons::heart (heartArea));
+    g.fillPath (Icons::heart ({ credit.getX() + beforeW + 1.0f, credit.getCentreY() - 6.0f, 14.0f, 12.0f }));
 
     g.setColour (Theme::text);
     g.drawText (after, credit.withTrimmedLeft (beforeW + 16.0f), juce::Justification::centredLeft, false);
-
-    // ---- Pied
-    g.setColour (Theme::textFaint);
-    g.setFont (Theme::font (12.0f));
-    g.drawText (txt (AppInfo::copyrightLine), l.copyright, juce::Justification::centred, false);
 }
 
 //==============================================================================
@@ -358,7 +604,7 @@ void SettingsDialog::mouseMove (const juce::MouseEvent& e)
     {
         logoHovered = over;
         setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
-        repaint (logoBounds().expanded (8));
+        repaint();
     }
 }
 
@@ -368,7 +614,7 @@ void SettingsDialog::mouseExit (const juce::MouseEvent&)
     {
         logoHovered = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
-        repaint (logoBounds().expanded (8));
+        repaint();
     }
 }
 

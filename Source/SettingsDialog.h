@@ -2,13 +2,14 @@
 // ==============================================================================
 //  SettingsDialog.h — AuraClean (NextDSP)
 //
-//  Panneau « Réglages » (bouton engrenage de l'en-tête, ⌘, ou menu AuraClean) :
-//    - Mises à jour : version installée, état, « Rechercher des mises à jour »,
-//      « Télécharger », interrupteur « Rechercher automatiquement au lancement »
-//    - À propos : logo cliquable (→ site), version, « Développé avec amour par ZEYN »
+//  Panneau « Réglages » (bouton engrenage, ⌘, ou menu AuraClean), à onglets :
+//    - Licence      : Mode Aperçu / Licence Active, clé masquée, Activer, Acheter,
+//                     Désactiver ce Mac
+//    - Mises à jour : version installée, état, Rechercher, Télécharger,
+//                     vérification automatique au lancement
+//    - À propos     : logo cliquable (→ site), version, « Développé avec ♥ par ZEYN »
 //
-//  Même présentation que DeepCleanDialog : voile uni + carte #11131A, fondus.
-//  Aucun setGradientFill direct (voir Theme::fillPathWithGradient).
+//  Même présentation que les autres modales. Aucun setGradientFill direct.
 // ==============================================================================
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -16,6 +17,7 @@
 #include <functional>
 
 #include "AuraWidgets.h"
+#include "LicenseManager.h"
 #include "UpdateChecker.h"
 
 namespace aura
@@ -24,18 +26,23 @@ class SettingsDialog : public juce::Component,
                        private juce::Timer
 {
 public:
-    SettingsDialog (juce::Image logo, juce::String currentVersion, bool autoCheckEnabled);
+    enum class Tab { License = 0, Updates, About };
+
+    SettingsDialog (juce::Image logo, juce::String currentVersion, bool autoCheckEnabled,
+                    LicenseManager& license, Tab initialTab);
     ~SettingsDialog() override;
 
     std::function<void()>                  onClose;
     std::function<void()>                  onCheckForUpdates;
     std::function<void (bool)>             onAutoCheckChanged;
     std::function<void (const juce::URL&)> onDownload;
+    std::function<void()>                  onActivateLicense;  // ouvre la modale d'activation
 
+    void selectTab (Tab);
     void setChecking();
     void showUpdateResult (const UpdateInfo&);
+    void refreshLicense();
 
-    /** Fondu de sortie (120 ms) puis onDone. */
     void dismiss (std::function<void()> onDone);
 
     void paint (juce::Graphics&) override;
@@ -51,17 +58,36 @@ private:
     void timerCallback() override;
     juce::Rectangle<int> cardBounds() const;
     juce::Rectangle<int> logoBounds() const;
-    void layoutUpdateButtons();
+    void updateVisibility();
+    void confirmDeactivation();
 
-    juce::Image  logo;
-    juce::String version;
-    UpdateInfo   lastInfo;
-    UpdateState  state = UpdateState::Idle;
-    bool         logoHovered = false;
+    void paintLicenseTab (juce::Graphics&, juce::Rectangle<int> content);
+    void paintUpdatesTab (juce::Graphics&, juce::Rectangle<int> content);
+    void paintAboutTab (juce::Graphics&, juce::Rectangle<int> content);
 
-    IconButton         closeButton { IconButton::Glyph::Close, juce::String::fromUTF8 ("Fermer (Échap)") };
-    juce::TextButton   checkButton, downloadButton, websiteButton;
+    juce::Image     logo;
+    juce::String    version;
+    LicenseManager& license;
+    Tab             tab;
+
+    UpdateInfo  lastInfo;
+    UpdateState state = UpdateState::Idle;
+    bool        logoHovered = false;
+
+    juce::String licenseMessage;
+    juce::Colour licenseMessageColour;
+    bool         deactivating = false;
+
+    IconButton closeButton { IconButton::Glyph::Close, juce::String::fromUTF8 ("Fermer (Échap)") };
+    std::array<juce::TextButton, 3> tabButtons;
+
+    // Licence
+    juce::TextButton activateButton, buyButton, deactivateButton;
+    // Mises à jour
+    juce::TextButton   checkButton, downloadButton;
     juce::ToggleButton autoCheckToggle;
+    // À propos
+    juce::TextButton websiteButton;
 
     double                animationStartMs = 0.0;
     bool                  dismissing = false;

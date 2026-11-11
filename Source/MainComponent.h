@@ -21,6 +21,8 @@
 #include "AppInfo.h"
 #include "AuraWidgets.h"
 #include "DeepCleanDialog.h"
+#include "LicenseDialog.h"
+#include "LicenseManager.h"
 #include "SettingsDialog.h"
 #include "LeftoverScanner.h"
 #include "PluginScanner.h"
@@ -317,8 +319,11 @@ public:
 
     /** Vérification de mise à jour. userInitiated = depuis le menu : affiche aussi « à jour » / erreurs. */
     void checkForUpdates (bool userInitiated);
-    void showAbout();     // = showSettings() (section « À propos » incluse)
-    void showSettings();
+    void showAbout();     // Réglages, onglet « À propos »
+    void showSettings (SettingsDialog::Tab tab = SettingsDialog::Tab::License);
+
+    /** Ouvre « Activer AuraClean ». afterActivation est exécutée si l'activation réussit. */
+    void showLicenseDialog (std::function<void()> afterActivation = {});
 
     static juce::String applicationVersion();
 
@@ -352,7 +357,8 @@ private:
     void setupChip (juce::TextButton&, const juce::String& text, juce::Colour accent);
     void setupButton (juce::TextButton&, const juce::String& text, const char* style = "");
 
-    Library library;  // doit précéder les vues qui le référencent
+    Library        library;  // doit précéder les vues qui le référencent
+    LicenseManager license;  // vérifie license.dat hors-ligne dès la construction
 
     // Header
     LogoButton                          logoButton { AppInfo::logo() };
@@ -382,6 +388,14 @@ private:
     std::unique_ptr<SettingsDialog>  settingsDialog;
     std::unique_ptr<SettingsDialog>  closingSettings;  // en cours de fondu de sortie
     void closeSettings();
+
+    std::unique_ptr<LicenseDialog>   licenseDialog;
+    std::unique_ptr<LicenseDialog>   closingLicense;
+    std::function<void()>            pendingLicensedAction;  // rejouée après une activation réussie
+    void closeLicenseDialog();
+
+    /** Exécute l'action si AuraClean est activé ; sinon ouvre l'activation et la rejoue après succès. */
+    void runLicensed (std::function<void()> action);
 
     BusyOverlay                      overlay;
     IntroOverlay                     intro;

@@ -170,6 +170,12 @@ DeepCleanDialog::~DeepCleanDialog()
     stopTimer();
 }
 
+void DeepCleanDialog::setPreviewMode (bool shouldBePreview)
+{
+    previewMode = shouldBePreview;
+    repaint();
+}
+
 void DeepCleanDialog::dismiss (std::function<void()> onDone)
 {
     if (dismissing)
@@ -358,7 +364,8 @@ void DeepCleanDialog::paint (juce::Graphics& g)
 
     g.setColour (Theme::text);
     g.setFont (Theme::font (22.0f, true));
-    g.drawText (fr ("Désinstallation complète"), titleLine, juce::Justification::centredLeft, false);
+    g.drawText (previewMode ? fr ("Prévisualisation de désinstallation") : fr ("Désinstallation complète"),
+                titleLine, juce::Justification::centredLeft, false);
 
     int bundleCount = 0, leftoverTotal = 0;
 
@@ -408,10 +415,12 @@ void DeepCleanDialog::paint (juce::Graphics& g)
     juce::String details = fr ("dont ") + formatBytes (leftoverBytes) + fr (" de fichiers résiduels (")
                          + juce::String (leftoverCount) + ")";
 
-    if (anyAdmin)
+    if (previewMode)
+        details << fr ("  ·  Mode Aperçu : licence requise pour exécuter");
+    else if (anyAdmin)
         details << fr ("  ·  mot de passe administrateur demandé une seule fois");
 
-    g.setColour (Theme::textFaint);
+    g.setColour (previewMode ? Theme::violet.interpolatedWith (Theme::text, 0.35f) : Theme::textFaint);
     g.setFont (Theme::font (13.0f));
     g.drawText (details, footer.removeFromTop (22), juce::Justification::centredLeft, true);
 }

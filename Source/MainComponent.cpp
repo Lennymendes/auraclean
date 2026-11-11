@@ -1693,6 +1693,16 @@ MainComponent::MainComponent()
     intro.onHidden = [this] { introHidden(); };
     addChildComponent (intro);
 
+    // ---- Licence : tout changement (activation / désactivation) se reflète dans les modales ouvertes
+    license.onStateChanged = [this]
+    {
+        if (settingsDialog != nullptr)
+            settingsDialog->refreshLicense();
+
+        if (deepCleanDialog != nullptr)
+            deepCleanDialog->setPreviewMode (! license.isActivated());
+    };
+
     // ---- Mises à jour
     // La bannière décale toute l'interface : il faut aussi redessiner ce que MainComponent peint
     // lui-même (fond d'en-tête, séparateurs, libellés), sinon il reste des traces aux anciennes positions.
@@ -1845,6 +1855,10 @@ void MainComponent::resized()
         if (panel != nullptr)
             panel->setBounds (area);
 
+    for (auto* panel : { licenseDialog.get(), closingLicense.get() })
+        if (panel != nullptr)
+            panel->setBounds (area);
+
     if (const int bannerHeight = updateBanner.getCurrentHeight(); bannerHeight > 0)
         updateBanner.setBounds (area.removeFromTop (bannerHeight));
     else
@@ -1915,6 +1929,12 @@ bool MainComponent::handleShortcut (const juce::KeyPress& key)
     const auto cmd = juce::ModifierKeys::commandModifier;
 
     // Modale ouverte : elle seule reçoit le clavier (Échap ferme, Entrée confirme)
+    if (licenseDialog != nullptr)
+        return licenseDialog->keyPressed (key);
+
+    if (closingLicense != nullptr)
+        return true;
+
     if (deepCleanDialog != nullptr)
         return deepCleanDialog->keyPressed (key);
 
@@ -2168,16 +2188,22 @@ void MainComponent::handleUpdateResult (const UpdateInfo& info, bool userInitiat
 
 void MainComponent::showAbout()
 {
-    showSettings();
+    showSettings (SettingsDialog::Tab::About);
 }
 
-void MainComponent::showSettings()
+void MainComponent::showSettings (SettingsDialog::Tab tab)
 {
-    if (settingsDialog != nullptr || deepCleanDialog != nullptr)
+    if (settingsDialog != nullptr)
+    {
+        settingsDialog->selectTab (tab);
+        return;
+    }
+
+    if (deepCleanDialog != nullptr || licenseDialog != nullptr)
         return;
 
     settingsDialog = std::make_unique<SettingsDialog> (AppInfo::logo(), applicationVersion(),
-                                                       UpdateChecker::isAutoCheckEnabled());
+                                                       UpdateChecker::isAutoCheckEnabled(), license, tab);
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
@@ -2195,6 +2221,12 @@ void MainComponent::showSettings()
 
     settingsDialog->onAutoCheckChanged = [] (bool enabled) { UpdateChecker::setAutoCheckEnabled (enabled); };
 
+    settingsDialog->onActivateLicense = [safe]
+    {
+        if (auto* self = safe.getComponent())
+            self->showLicenseDialog();
+    };
+
     settingsDialog->onDownload = [] (const juce::URL& url)
     {
         if (UpdateChecker::isTrustedDownloadUrl (url))
@@ -2208,6 +2240,80 @@ void MainComponent::showSettings()
 
     if (updateChecker.isChecking())
         settingsDialog->setChecking();
+}
+
+void MainComponent::runLicensed (std::function<void()> action)
+{
+    if (license.isActivated())
+    {
+        if (action)
+            action();
+        return;
+    }
+
+    showLicenseDialog (std::move (action));
+}
+
+void MainComponent::showLicenseDialog (std::function<void()> afterActivation)
+{
+    if (licenseDialog != nullptr)
+        return;
+
+    pendingLicensedAction = std::move (afterActivation);
+    licenseDialog = std::make_unique<LicenseDialog> (license, AppInfo::logo());
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    licenseDialog->onClose = [safe]
+    {
+        if (auto* self = safe.getComponent())
+            self->closeLicenseDialog();
+    };
+
+    licenseDialog->onActivated = [safe]
+    {
+        if (auto* self = safe.getComponent())
+        {
+            auto action = std::move (self->pendingLicensedAction);
+            self->closeLicenseDialog();
+
+            if (action)
+                action();  // ex. la mise à la Corbeille demandée en Mode Aperçu
+        }
+    };
+
+    addAndMakeVisible (*licenseDialog);
+    licenseDialog->setBounds (getLocalBounds());
+    licenseDialog->toFront (true);
+}
+
+void MainComponent::closeLicenseDialog()
+{
+    if (licenseDialog == nullptr)
+        return;
+
+    pendingLicensedAction = nullptr;
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    closingLicense = std::move (licenseDialog);
+    auto* closing = closingLicense.get();
+
+    closingLicense->dismiss ([safe, closing]
+    {
+        juce::MessageManager::callAsync ([safe, closing]
+        {
+            if (auto* self = safe.getComponent(); self != nullptr && self->closingLicense.get() == closing)
+                self->closingLicense.reset();
+        });
+    });
+
+    // Le focus revient à la modale restée ouverte en dessous
+    if (deepCleanDialog != nullptr)
+        deepCleanDialog->grabKeyboardFocus();
+    else if (settingsDialog != nullptr)
+        settingsDialog->grabKeyboardFocus();
+    else
+        grabKeyboardFocus();
 }
 
 void MainComponent::closeSettings()
@@ -2402,7 +2508,11 @@ void MainComponent::requestOperation (Operation op)
                                   {
                                       if (result == 1)
                                           if (auto* self = safe.getComponent())
-                                              self->runOperation (op, targets);
+                                              self->runLicensed ([safe, op, targets]
+                                              {
+                                                  if (auto* s = safe.getComponent())
+                                                      s->runOperation (op, targets);
+                                              });
                                   });
 }
 
@@ -2675,6 +2785,7 @@ void MainComponent::startDeepClean (std::vector<int> targets, int hiddenCount)
 void MainComponent::showDeepClean (std::vector<CleanGroup> groups, const juce::String& warning, bool leftoversSearched)
 {
     deepCleanDialog = std::make_unique<DeepCleanDialog> (std::move (groups), warning, leftoversSearched);
+    deepCleanDialog->setPreviewMode (! license.isActivated());
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
@@ -2686,11 +2797,17 @@ void MainComponent::showDeepClean (std::vector<CleanGroup> groups, const juce::S
 
     deepCleanDialog->onConfirm = [safe] (std::vector<CleanCandidate> items)
     {
+        // Mode Aperçu : la modale reste ouverte, l'activation s'affiche par-dessus,
+        // et la mise à la Corbeille repart automatiquement si l'activation réussit.
         if (auto* self = safe.getComponent())
-        {
-            self->closeDeepClean();
-            self->runTrash (std::move (items));
-        }
+            self->runLicensed ([safe, selected = std::move (items)]
+            {
+                if (auto* s = safe.getComponent())
+                {
+                    s->closeDeepClean();
+                    s->runTrash (selected);
+                }
+            });
     };
 
     addAndMakeVisible (*deepCleanDialog);
