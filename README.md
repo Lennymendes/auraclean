@@ -117,7 +117,7 @@ Le CDN de GitHub met ce fichier en cache quelques minutes après chaque push.
 
 - Comparaison SemVer avec la version de l'app (`1.0.1 > 1.0.0`, `1.10 > 1.9`, `1.1.0-beta.2 < 1.1.0`).
 - **Téléchargement intégré** : si `download_url` pointe vers un `.dmg` (ex.
-  `https://github.com/Lennymendes/auraclean/releases/latest/download/AuraClean-macOS.dmg`), l'app le télécharge
+  `https://github.com/Lennymendes/auraclean-updates/releases/latest/download/AuraClean-macOS.dmg`), l'app le télécharge
   elle-même dans `~/Downloads` (progression dans la bannière) puis ouvre l'image disque. Sinon, navigateur.
 - Nouvelle version → bannière en haut de la fenêtre : *Télécharger la mise à jour* (navigateur),
   *Plus tard*, *Ignorer cette version* (mémorisé dans `~/Library/Application Support/NextDSP/AuraClean.settings`).
