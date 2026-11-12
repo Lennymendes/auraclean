@@ -30,6 +30,8 @@ juce::String formatLabel (PluginFormat f)
         case PluginFormat::VST3: return "VST3";
         case PluginFormat::AU:   return "AU";
         case PluginFormat::AAX:  return "AAX";
+        case PluginFormat::VST2: return "VST";
+        case PluginFormat::CLAP: return "CLAP";
     }
     return {};
 }
@@ -41,6 +43,8 @@ juce::String formatExtension (PluginFormat f)
         case PluginFormat::VST3: return ".vst3";
         case PluginFormat::AU:   return ".component";
         case PluginFormat::AAX:  return ".aaxplugin";
+        case PluginFormat::VST2: return ".vst";
+        case PluginFormat::CLAP: return ".clap";
     }
     return {};
 }
@@ -371,7 +375,7 @@ namespace
 
     bool isOpaqueBundleName (const std::string& name)
     {
-        for (const char* ext : { ".app", ".bundle", ".framework", ".plugin", ".vst", ".dpm", ".aaxplugin", ".component", ".vst3" })
+        for (const char* ext : { ".app", ".bundle", ".framework", ".plugin", ".vst", ".clap", ".dpm", ".aaxplugin", ".component", ".vst3" })
             if (endsWithIgnoreCase (name, ext))
                 return true;
 
@@ -728,7 +732,7 @@ juce::String PluginScanner::cleanPluginName (const juce::String& rawName, const 
             name = rest;
     }
 
-    static const juce::StringArray tags { "(AAX)", "(VST3)", "(AU)", "AAX Native", "AAX", "VST3", "VST",
+    static const juce::StringArray tags { "(AAX)", "(VST3)", "(AU)", "(VST)", "(CLAP)", "(Mono)", "(Stereo)", "AAX Native", "AAX", "VST3", "VST", "CLAP",
                                           "AU", "x64", "64-bit", "64bit", "Mono", "Stereo" };
 
     for (bool changed = true; changed;)
@@ -770,6 +774,10 @@ std::vector<ScanLocation> PluginScanner::defaultLocations()
     addPair (userPlug.getChildFile ("VST3"),         userPlug.getChildFile ("VST3 (Disabled)"),         PluginFormat::VST3, InstallScope::User);
     addPair (systemPlug.getChildFile ("Components"), systemPlug.getChildFile ("Components (Disabled)"), PluginFormat::AU,   InstallScope::System);
     addPair (userPlug.getChildFile ("Components"),   userPlug.getChildFile ("Components (Disabled)"),   PluginFormat::AU,   InstallScope::User);
+    addPair (systemPlug.getChildFile ("VST"),        systemPlug.getChildFile ("VST (Disabled)"),        PluginFormat::VST2, InstallScope::System);
+    addPair (userPlug.getChildFile ("VST"),          userPlug.getChildFile ("VST (Disabled)"),          PluginFormat::VST2, InstallScope::User);
+    addPair (systemPlug.getChildFile ("CLAP"),       systemPlug.getChildFile ("CLAP (Disabled)"),       PluginFormat::CLAP, InstallScope::System);
+    addPair (userPlug.getChildFile ("CLAP"),         userPlug.getChildFile ("CLAP (Disabled)"),         PluginFormat::CLAP, InstallScope::User);
 
     // Convention Avid : Pro Tools ignore nativement "Plug-Ins (Unused)"
     addPair (avidAudio.getChildFile ("Plug-Ins"), avidAudio.getChildFile ("Plug-Ins (Unused)"), PluginFormat::AAX, InstallScope::System);

@@ -283,7 +283,7 @@ bool UninstallerMac::isSafePluginPath (const juce::File& bundle, const std::vect
 
     const auto ext = bundle.getFileExtension().toLowerCase();
 
-    if (ext != ".vst3" && ext != ".component" && ext != ".aaxplugin")
+    if (ext != ".vst3" && ext != ".component" && ext != ".aaxplugin" && ext != ".vst" && ext != ".clap")
     {
         reason = txt ("extension non reconnue comme plugin audio");
         return false;

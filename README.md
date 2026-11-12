@@ -21,14 +21,15 @@ AuraClean/
     ├── LicenseDialog.h/.cpp    Modale « Activer AuraClean »
     ├── AuraWidgets.h           IconButton (engrenage, fermer), LogoButton (logo cliquable → site)
     ├── AppInfo.h               Site, crédits, logo embarqué (BinaryData)
-    ├── AuraLookAndFeel.h     Thème #0D0E12, cyan / violet, chips, header de table, scrollbars
+    ├── AuraLookAndFeel.h     Thème gris neutre, chips, header de table, scrollbars
     └── MainComponent.h/.cpp  Library (filtres + sélection), VendorSidebar, PluginTable, overlay
 ```
 
 ## Flux de données
 
-1. `PluginScanner::scan()` (thread de fond) liste les bundles des 5 dossiers actifs + leurs 5 dossiers
-   de quarantaine, puis répartit `inspectBundle()` sur 2–8 threads. Aucun binaire n'est chargé.
+1. `PluginScanner::scan()` (thread de fond) liste les bundles de 5 formats — **VST3, AU, AAX, VST (VST2 `.vst`)
+   et CLAP (`.clap`)** — dans `/Library/Audio/Plug-Ins/{VST3,Components,VST,CLAP}`, leurs équivalents `~/Library`,
+   le dossier Avid, et les dossiers de quarantaine `… (Disabled)` correspondants, puis répartit `inspectBundle()` sur 2–8 threads. Aucun binaire n'est chargé.
 2. `inspectBundle()` : Info.plist via `CFPropertyListCreateWithData` (XML **et** binaire), moduleinfo.json
    (commentaires / virgules JSON5 tolérés), taille via `fts(3)`, date = « Date d'ajout » Finder
    (`ATTR_CMN_ADDEDTIME`, repli `st_birthtime`), architecture via `MachOInspector`.
@@ -57,7 +58,9 @@ AuraClean/
 « Désinstaller » ouvre une modale listant, par plugin, les bundles ET les fichiers résiduels :
 `Application Support`, `Audio/Presets`, `Preferences` (+ `ByHost`), `Caches`, `Logs` (dans `/Library` et
 `~/Library`), `/Users/Shared`, `~/Documents/VST3 Presets`, `~/Music/Audio Music Apps/Plug-In Settings`,
-`~/Documents/<Vendor>` et `~/Music/<Vendor>` (FabFilter, iZotope, NI, Xfer…), et les reçus `/var/db/receipts/*.bom|.plist` (contenu lu via `lsbom -fls`).
+`~/Documents/<Vendor>` et `~/Music/<Vendor>` (FabFilter, iZotope, NI, Xfer…), `~/Library/{Saved Application State,
+HTTPStorages,WebKit,Application Scripts}`, `/Library/Audio/{Impulse Responses,Sounds}/<Vendor>`,
+`/Library/Application Support/Avid/Audio/Plug-In Settings`, et les reçus `/var/db/receipts/*.bom|.plist` (contenu lu via `lsbom -fls`).
 
 Règles de sécurité :
 - **Formats complets** : les résidus ne sont recherchés (et cochables) que si **tous** les formats installés du
@@ -113,6 +116,9 @@ Le CDN de GitHub met ce fichier en cache quelques minutes après chaque push.
 ```
 
 - Comparaison SemVer avec la version de l'app (`1.0.1 > 1.0.0`, `1.10 > 1.9`, `1.1.0-beta.2 < 1.1.0`).
+- **Téléchargement intégré** : si `download_url` pointe vers un `.dmg` (ex.
+  `https://github.com/Lennymendes/auraclean/releases/latest/download/AuraClean-macOS.dmg`), l'app le télécharge
+  elle-même dans `~/Downloads` (progression dans la bannière) puis ouvre l'image disque. Sinon, navigateur.
 - Nouvelle version → bannière en haut de la fenêtre : *Télécharger la mise à jour* (navigateur),
   *Plus tard*, *Ignorer cette version* (mémorisé dans `~/Library/Application Support/NextDSP/AuraClean.settings`).
 - Au lancement, aucune erreur réseau n'est affichée ; depuis le menu, « à jour » ou l'erreur s'affiche.

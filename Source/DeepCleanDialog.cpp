@@ -22,12 +22,12 @@ namespace
     constexpr double kFadeInMs  = 150.0;
     constexpr double kFadeOutMs = 120.0;
 
-    const juce::Colour kVeil        { 0xd807080c };
-    const juce::Colour kTotal       { 0xff22d3ee };
-    const juce::Colour kCard        { 0xff11131a };
-    const juce::Colour kCardBorder  { 0xff252836 };
-    const juce::Colour kGroupRow    { 0xff161922 };
-    const juce::Colour kRowDivider  { 0xff1d2029 };
+    const juce::Colour kVeil        { 0xcc0a0a0b };
+    const juce::Colour kTotal       { 0xffececee };
+    const juce::Colour kCard        { 0xff1e1e20 };
+    const juce::Colour kCardBorder  { 0xff3a3a3e };
+    const juce::Colour kGroupRow    { 0xff262628 };
+    const juce::Colour kRowDivider  { 0xff2c2c2f };
 
     float easeOutCubic (float t) { t = juce::jlimit (0.0f, 1.0f, t); return 1.0f - std::pow (1.0f - t, 3.0f); }
 
@@ -44,9 +44,9 @@ namespace
             return;
         }
 
-        g.setColour (Theme::violet.withMultipliedAlpha (alpha));  // uni : aucun dégradé dans cette modale
+        g.setColour (Theme::cyan.withMultipliedAlpha (alpha));  // uni : aucun dégradé dans cette modale
         g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (juce::Colours::white.withMultipliedAlpha (alpha));
+        g.setColour (Theme::background.withMultipliedAlpha (alpha));
 
         if (state == Tri::All)
         {

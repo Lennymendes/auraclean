@@ -16,10 +16,10 @@ namespace
     constexpr double kFadeOutMs    = 120.0;
     constexpr double kSuccessHold  = 900.0;
 
-    const juce::Colour kVeil       { 0xd807080c };
-    const juce::Colour kCard       { 0xff11131a };
-    const juce::Colour kCardBorder { 0xff252836 };
-    const juce::Colour kField      { 0xff161922 };
+    const juce::Colour kVeil       { 0xcc0a0a0b };
+    const juce::Colour kCard       { 0xff1e1e20 };
+    const juce::Colour kCardBorder { 0xff3a3a3e };
+    const juce::Colour kField      { 0xff262628 };
 
     constexpr int kCardW = 580;
     constexpr int kCardH = 392;

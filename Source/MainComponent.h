@@ -55,7 +55,7 @@ struct Filters
 {
     juce::String                   search;
     juce::String                   vendorKey;  // vide = toutes les marques
-    std::array<bool, kNumFormats>  formats { true, true, true };
+    std::array<bool, kNumFormats>  formats { true, true, true, true, true };
     ArchFilter                     arch   = ArchFilter::All;
     StatusFilter                   status = StatusFilter::All;
 };
@@ -284,6 +284,11 @@ public:
 
     void show (const UpdateInfo&);
     void hide();
+
+    // Téléchargement intégré du .dmg
+    void setDownloadProgress (float progress01);  // -1 : taille inconnue
+    void setDownloadReady (const juce::File& dmg);
+    void setDownloadFailed (const juce::String& message);
     int  getCurrentHeight() const noexcept;
     bool isShowingOrAnimating() const noexcept { return target > 0.0f || reveal > 0.0f; }
 
@@ -297,7 +302,14 @@ public:
 private:
     void timerCallback() override;
 
+    enum class DownloadState { Idle, Downloading, Ready, Failed };
+    void applyDownloadState();
+
     UpdateInfo       info;
+    DownloadState    downloadState = DownloadState::Idle;
+    float            downloadProgress = 0.0f;
+    juce::File       downloadedFile;
+    juce::String     downloadError;
     float            reveal = 0.0f, target = 0.0f, startValue = 0.0f;
     double           animationStartMs = 0.0;
     juce::TextButton downloadButton, laterButton, skipButton;
@@ -369,7 +381,8 @@ private:
     juce::TextButton                    rescanButton;
 
     // Sélection rapide
-    juce::TextButton selectVst3, selectAu, selectAax, selectVendor, selectVisible, selectNone;
+    std::array<juce::TextButton, kNumFormats> selectFormatButtons;
+    juce::TextButton selectVendor, selectVisible, selectNone;
 
     VendorSidebar sidebar { library };
     PluginTable   table { library };
@@ -384,6 +397,10 @@ private:
     bool                             hasPendingUpdate = false;
 
     void handleUpdateResult (const UpdateInfo&, bool userInitiated);
+
+    UpdateDownloader                 updateDownloader;
+    UpdateInfo                       availableUpdate;  // dernière mise à jour trouvée
+    void downloadUpdate (const juce::URL&);
 
     std::unique_ptr<SettingsDialog>  settingsDialog;
     std::unique_ptr<SettingsDialog>  closingSettings;  // en cours de fondu de sortie

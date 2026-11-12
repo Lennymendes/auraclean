@@ -16,10 +16,10 @@ namespace
     constexpr double kFadeInMs  = 150.0;
     constexpr double kFadeOutMs = 120.0;
 
-    const juce::Colour kVeil       { 0xd807080c };
-    const juce::Colour kCard       { 0xff11131a };
-    const juce::Colour kCardBorder { 0xff252836 };
-    const juce::Colour kInset      { 0xff161922 };
+    const juce::Colour kVeil       { 0xcc0a0a0b };
+    const juce::Colour kCard       { 0xff1e1e20 };
+    const juce::Colour kCardBorder { 0xff3a3a3e };
+    const juce::Colour kInset      { 0xff262628 };
 
     constexpr int kCardW  = 640;
     constexpr int kCardH  = 430;
@@ -120,8 +120,8 @@ SettingsDialog::SettingsDialog (juce::Image logoImage, juce::String currentVersi
         auto& b = tabButtons[(size_t) i];
         b.setButtonText (txt (tabNames[i]));
         b.getProperties().set ("auraStyle", "tab");
-        b.setClickingTogglesState (true);
-        b.setRadioGroupId (4242);
+        // Pas de setRadioGroupId : en désélectionnant l'ancien onglet, JUCE rejouait son onClick
+        // et le laissait affiché comme actif. L'état est géré à la main dans selectTab().
         b.onClick = [this, i] { selectTab ((Tab) i); };
         addAndMakeVisible (b);
     }
@@ -186,7 +186,10 @@ SettingsDialog::~SettingsDialog()
 void SettingsDialog::selectTab (Tab newTab)
 {
     tab = newTab;
-    tabButtons[(size_t) tab].setToggleState (true, juce::dontSendNotification);
+
+    for (size_t i = 0; i < tabButtons.size(); ++i)
+        tabButtons[i].setToggleState (i == (size_t) tab, juce::dontSendNotification);
+
     logoHovered = false;
     updateVisibility();
     repaint();
@@ -574,7 +577,7 @@ void SettingsDialog::paintAboutTab (juce::Graphics& g, juce::Rectangle<int> cont
 
     g.setColour (Theme::textDim);
     g.setFont (Theme::font (13.0f));
-    g.drawText (txt ("Version ") + version + txt ("  ·  Gestionnaire de plugins VST3 · AU · AAX"),
+    g.drawText (txt ("Version ") + version + txt ("  ·  VST3 · AU · AAX · VST · CLAP"),
                 text.removeFromTop (20), juce::Justification::centredLeft, true);
 
     // « Développé avec ♥ par ZEYN » — cœur vectoriel (pas de dépendance à une police emoji)

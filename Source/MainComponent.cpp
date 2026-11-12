@@ -68,7 +68,7 @@ namespace
 
     juce::Rectangle<int> formatBadgeBounds (int formatIndex, int rowHeight)
     {
-        constexpr int width = 46, height = 20, gap = 6, x0 = 10;
+        constexpr int width = 44, height = 20, gap = 5, x0 = 10;
         return { x0 + formatIndex * (width + gap), (rowHeight - height) / 2, width, height };
     }
 
@@ -143,7 +143,7 @@ namespace
 
         Theme::fillRoundedRectWithGradient (g, r, 4.0f, juce::ColourGradient (Theme::violet, r.getX(), r.getY(),
                                                                               Theme::cyan, r.getRight(), r.getBottom(), false));
-        g.setColour (juce::Colours::white);
+        g.setColour (Theme::background);
 
         if (state == CheckState::All)
         {
@@ -662,7 +662,7 @@ PluginTable::PluginTable (Library& lib) : library (lib)
     header.addColumn ({},                    colCheck,   44,  44,  44,  H::visible | H::sortable);
     header.addColumn ("Plugin",              colName,    250, 140, 600, H::defaultFlags);
     header.addColumn ("Marque",              colVendor,  160, 100, 360, H::defaultFlags);
-    header.addColumn ("Formats",             colFormats, 172, 172, 172, H::notResizable);
+    header.addColumn ("Formats",             colFormats, 262, 262, 262, H::notResizable);
     header.addColumn ("Architecture",        colArch,    130, 120, 180, H::defaultFlags);
     header.addColumn ("Version",             colVersion, 90,  70,  160, H::defaultFlags);
     header.addColumn ("Taille",              colSize,    120, 100, 180, H::defaultFlags);
@@ -1294,8 +1294,8 @@ void BusyOverlay::paint (juce::Graphics& g)
 namespace
 {
     constexpr double kBannerAnimMs = 220.0;
-    const juce::Colour kBannerBackground { 0xff12151d };
-    const juce::Colour kBannerBorder     { 0xff252836 };
+    const juce::Colour kBannerBackground { 0xff202022 };
+    const juce::Colour kBannerBorder     { 0xff3a3a3e };
 }
 
 UpdateBanner::UpdateBanner()
@@ -1306,9 +1306,10 @@ UpdateBanner::UpdateBanner()
     downloadButton.getProperties().set ("auraStyle", "primary");
     downloadButton.onClick = [this]
     {
-        if (onDownload)
+        if (downloadState == DownloadState::Ready)
+            downloadedFile.startAsProcess();  // rouvre l'image disque
+        else if (downloadState != DownloadState::Downloading && onDownload)
             onDownload (info.downloadUrl);
-        hide();
     };
 
     laterButton.setButtonText (fr ("Plus tard"));
@@ -1328,8 +1329,57 @@ UpdateBanner::UpdateBanner()
         addAndMakeVisible (b);
 }
 
+void UpdateBanner::applyDownloadState()
+{
+    const bool busy = downloadState == DownloadState::Downloading;
+    downloadButton.setEnabled (! busy);
+    skipButton.setVisible (downloadState == DownloadState::Idle);
+    laterButton.setButtonText (downloadState == DownloadState::Ready ? fr ("Fermer") : fr ("Plus tard"));
+
+    switch (downloadState)
+    {
+        case DownloadState::Idle:        downloadButton.setButtonText (fr ("Télécharger la mise à jour")); break;
+        case DownloadState::Downloading:
+            downloadButton.setButtonText (downloadProgress >= 0.0f
+                                              ? fr ("Téléchargement… ") + juce::String (juce::roundToInt (downloadProgress * 100.0f)) + " %"
+                                              : fr ("Téléchargement…"));
+            break;
+        case DownloadState::Ready:       downloadButton.setButtonText (fr ("Ouvrir l'installateur")); break;
+        case DownloadState::Failed:      downloadButton.setButtonText (fr ("Réessayer")); break;
+    }
+
+    repaint();
+}
+
+void UpdateBanner::setDownloadProgress (float progress01)
+{
+    downloadState    = DownloadState::Downloading;
+    downloadProgress = progress01;
+    applyDownloadState();
+}
+
+void UpdateBanner::setDownloadReady (const juce::File& dmg)
+{
+    downloadState  = DownloadState::Ready;
+    downloadedFile = dmg;
+    applyDownloadState();
+}
+
+void UpdateBanner::setDownloadFailed (const juce::String& message)
+{
+    downloadState = DownloadState::Failed;
+    downloadError = message;
+    applyDownloadState();
+}
+
 void UpdateBanner::show (const UpdateInfo& newInfo)
 {
+    if (downloadState == DownloadState::Idle || newInfo.latestVersion != info.latestVersion)
+    {
+        downloadState = DownloadState::Idle;
+        applyDownloadState();
+    }
+
     info = newInfo;
     setTooltip (info.releaseNotes.isNotEmpty() ? fr ("Nouveautés :\n") + info.releaseNotes : juce::String());
     setVisible (true);
@@ -1422,9 +1472,22 @@ void UpdateBanner::paint (juce::Graphics& g)
     if (info.releaseNotes.isNotEmpty())
         subtitle << fr ("  ·  ") << info.releaseNotes.upToFirstOccurrenceOf ("\n", false, false);
 
-    g.setColour (Theme::textDim);
+    if (downloadState == DownloadState::Downloading)
+        subtitle = fr ("Téléchargement dans votre dossier Téléchargements…");
+    else if (downloadState == DownloadState::Ready)
+        subtitle = fr ("Image disque ouverte : glissez AuraClean dans Applications, puis relancez l'app.");
+    else if (downloadState == DownloadState::Failed)
+        subtitle = downloadError;
+
+    g.setColour (downloadState == DownloadState::Failed ? Theme::warning : Theme::textDim);
     g.setFont (Theme::font (13.0f));
     g.drawText (subtitle, text, juce::Justification::topLeft, true);
+
+    if (downloadState == DownloadState::Downloading && downloadProgress > 0.0f)
+    {
+        g.setColour (Theme::cyan);
+        g.fillRect (0.0f, (float) getHeight() - 2.0f, (float) getWidth() * juce::jlimit (0.0f, 1.0f, downloadProgress), 2.0f);
+    }
 }
 
 //==============================================================================
@@ -1549,7 +1612,7 @@ void IntroOverlay::paint (juce::Graphics& g)
 
     // ---- Barre de chargement minimale
     const juce::Rectangle<float> track (centre.x - 120.0f, centre.y + 54.0f, 240.0f, 3.0f);
-    g.setColour (juce::Colour (0xff1b1e27).withAlpha (content));
+    g.setColour (juce::Colour (0xff2c2c2f).withAlpha (content));
     g.fillRoundedRectangle (track, 1.5f);
 
     const auto bar = track.withWidth (juce::jmax (3.0f, track.getWidth() * juce::jlimit (0.0f, 1.0f, shown)));
@@ -1641,23 +1704,24 @@ MainComponent::MainComponent()
         selectionChanged();
     };
 
-    setupButton (selectVst3, fr ("Tous les VST3"));
-    setupButton (selectAu,   fr ("Tous les AU"));
-    setupButton (selectAax,  fr ("Tous les AAX"));
+    for (int f = 0; f < kNumFormats; ++f)
+    {
+        const auto format = kAllFormats[(size_t) f];
+        auto& button = selectFormatButtons[(size_t) f];
+        setupButton (button, formatLabel (format));
+        button.onClick = [selectFormat, format] { selectFormat (format); };
+        button.setTooltip (fr ("Coche tous les ") + formatLabel (format)
+                           + fr (" visibles (respecte la marque, la recherche et les filtres)"));
+    }
+
     setupButton (selectVendor,  fr ("Toute la marque"));
     setupButton (selectVisible, fr ("Tout cocher"));
     setupButton (selectNone,    fr ("Aucun"), "ghost");
 
-    selectVst3.onClick    = [selectFormat] { selectFormat (PluginFormat::VST3); };
-    selectAu.onClick      = [selectFormat] { selectFormat (PluginFormat::AU); };
-    selectAax.onClick     = [selectFormat] { selectFormat (PluginFormat::AAX); };
     selectVendor.onClick  = [this] { library.selectVendor (library.filters.vendorKey, true); selectionChanged(); };
     selectVisible.onClick = [this] { library.selectAllVisible (true); selectionChanged(); };
     selectNone.onClick    = [this] { library.clearSelection(); selectionChanged(); };
 
-    selectVst3.setTooltip (fr ("Coche tous les VST3 visibles (respecte la marque, la recherche et les filtres)"));
-    selectAu.setTooltip   (fr ("Coche tous les Audio Units visibles"));
-    selectAax.setTooltip  (fr ("Coche tous les AAX visibles"));
     selectVendor.setTooltip (fr ("Coche tous les plugins de la marque choisie à gauche (clic droit sur une marque : idem)"));
 
     // ------------------------------------------------------------ Vues
@@ -1707,11 +1771,7 @@ MainComponent::MainComponent()
     // La bannière décale toute l'interface : il faut aussi redessiner ce que MainComponent peint
     // lui-même (fond d'en-tête, séparateurs, libellés), sinon il reste des traces aux anciennes positions.
     updateBanner.onLayoutChanged = [this] { resized(); repaint(); };
-    updateBanner.onDownload      = [] (const juce::URL& url)
-    {
-        if (UpdateChecker::isTrustedDownloadUrl (url))
-            url.launchInDefaultBrowser();
-    };
+    updateBanner.onDownload      = [this] (const juce::URL& url) { downloadUpdate (url); };
     updateBanner.onSkipVersion   = [] (const juce::String& version) { UpdateChecker::setSkippedVersion (version); };
     addChildComponent (updateBanner);
 
@@ -1878,14 +1938,14 @@ void MainComponent::resized()
     h.removeFromRight (8);
     rescanButton.setBounds (h.removeFromRight (118));
     h.removeFromRight (10);
-    statusBox.setBounds (h.removeFromRight (150));
+    statusBox.setBounds (h.removeFromRight (136));
     h.removeFromRight (8);
-    archBox.setBounds (h.removeFromRight (196));
-    h.removeFromRight (14);
+    archBox.setBounds (h.removeFromRight (184));
+    h.removeFromRight (12);
 
     for (int f = kNumFormats - 1; f >= 0; --f)
     {
-        formatChips[(size_t) f].setBounds (h.removeFromRight (64));
+        formatChips[(size_t) f].setBounds (h.removeFromRight (54));
         h.removeFromRight (6);
     }
 
@@ -1895,10 +1955,10 @@ void MainComponent::resized()
     // ---- Sélection rapide
     auto b = bulkArea.reduced (12, 9).withTrimmedLeft (134);
 
-    for (auto* button : { &selectVst3, &selectAu, &selectAax })
+    for (auto& button : selectFormatButtons)
     {
-        button->setBounds (b.removeFromLeft (118));
-        b.removeFromLeft (8);
+        button.setBounds (b.removeFromLeft (64));
+        b.removeFromLeft (6);
     }
 
     b.removeFromLeft (8);
@@ -2140,9 +2200,55 @@ void MainComponent::checkForUpdates (bool userInitiated)
     });
 }
 
+void MainComponent::downloadUpdate (const juce::URL& url)
+{
+    if (! UpdateChecker::isTrustedDownloadUrl (url) || updateDownloader.isDownloading())
+        return;
+
+    // Lien vers une page (boutique, site) et non vers un .dmg : navigateur
+    if (! UpdateDownloader::isDirectDownload (url))
+    {
+        url.launchInDefaultBrowser();
+        return;
+    }
+
+    if (! updateBanner.isShowingOrAnimating())
+        updateBanner.show (availableUpdate);
+
+    updateBanner.setDownloadProgress (0.0f);
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+
+    updateDownloader.start (url, availableUpdate.latestVersion,
+                            [safe] (float p)
+                            {
+                                if (auto* self = safe.getComponent())
+                                    self->updateBanner.setDownloadProgress (p);
+                            },
+                            [safe] (const juce::File& dmg, const juce::String& error)
+                            {
+                                auto* self = safe.getComponent();
+
+                                if (self == nullptr)
+                                    return;
+
+                                if (error.isNotEmpty())
+                                {
+                                    self->updateBanner.setDownloadFailed (error);
+                                    return;
+                                }
+
+                                self->updateBanner.setDownloadReady (dmg);
+                                dmg.startAsProcess();  // monte l'image disque et ouvre sa fenêtre
+                            });
+}
+
 void MainComponent::handleUpdateResult (const UpdateInfo& info, bool userInitiated)
 {
     using Status = UpdateInfo::Status;
+
+    if (info.status == Status::UpdateAvailable)
+        availableUpdate = info;
 
     // Réglages ouverts : le résultat s'affiche dans le panneau (pas d'alerte par-dessus)
     if (settingsDialog != nullptr)
@@ -2227,10 +2333,13 @@ void MainComponent::showSettings (SettingsDialog::Tab tab)
             self->showLicenseDialog();
     };
 
-    settingsDialog->onDownload = [] (const juce::URL& url)
+    settingsDialog->onDownload = [safe] (const juce::URL& url)
     {
-        if (UpdateChecker::isTrustedDownloadUrl (url))
-            url.launchInDefaultBrowser();
+        if (auto* self = safe.getComponent())
+        {
+            self->closeSettings();
+            self->downloadUpdate (url);
+        }
     };
 
     addAndMakeVisible (*settingsDialog);

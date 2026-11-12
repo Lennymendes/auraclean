@@ -12,30 +12,26 @@ namespace aura
 {
 namespace Theme
 {
-    inline const juce::Colour background { 0xff0d0e12 };
-    inline const juce::Colour panel      { 0xff13151b };
-    inline const juce::Colour panelAlt   { 0xff181b23 };
-    inline const juce::Colour raised     { 0xff20242e };
-    inline const juce::Colour border     { 0xff2a2f3b };
-    inline const juce::Colour text       { 0xffe8eaf0 };
-    inline const juce::Colour textDim    { 0xff8b92a5 };
-    inline const juce::Colour textFaint  { 0xff596073 };
-    inline const juce::Colour cyan       { 0xff22d3ee };
-    inline const juce::Colour violet     { 0xff8b5cf6 };
-    inline const juce::Colour blue       { 0xff60a5fa };
-    inline const juce::Colour success    { 0xff34d399 };
-    inline const juce::Colour warning    { 0xfff59e0b };
-    inline const juce::Colour danger     { 0xffef4444 };
+    // Thème gris neutre, sobre : aucun accent coloré. « cyan » et « violet » sont conservés comme
+    // noms historiques des deux accents (clair / moyen), désormais en niveaux de gris.
+    inline const juce::Colour background { 0xff161617 };
+    inline const juce::Colour panel      { 0xff1c1c1e };
+    inline const juce::Colour panelAlt   { 0xff222224 };
+    inline const juce::Colour raised     { 0xff2c2c2f };
+    inline const juce::Colour border     { 0xff38383c };
+    inline const juce::Colour text       { 0xffececee };
+    inline const juce::Colour textDim    { 0xff9b9ba1 };
+    inline const juce::Colour textFaint  { 0xff68686e };
+    inline const juce::Colour cyan       { 0xffd8d8dc };  // accent clair
+    inline const juce::Colour violet     { 0xff8c8c94 };  // accent moyen
+    inline const juce::Colour blue       { 0xffb0b0b6 };
+    inline const juce::Colour success    { 0xff8fbfa0 };  // états : teintes désaturées
+    inline const juce::Colour warning    { 0xffcda35f };
+    inline const juce::Colour danger     { 0xffc45c5c };
 
-    inline juce::Colour formatColour (PluginFormat f)
+    inline juce::Colour formatColour (PluginFormat)
     {
-        switch (f)
-        {
-            case PluginFormat::VST3: return cyan;
-            case PluginFormat::AU:   return violet;
-            case PluginFormat::AAX:  return blue;
-        }
-        return text;
+        return blue;  // tous les formats partagent le même gris : le libellé suffit
     }
 
     inline juce::Colour archColour (ArchClass c)
@@ -217,8 +213,8 @@ public:
 
         if (style == "primary")
         {
-            fill    = Theme::violet;
-            outline = Theme::violet.brighter (0.25f);
+            fill    = juce::Colour (0xffe4e4e7);  // bouton principal clair, texte sombre
+            outline = juce::Colour (0xfff4f4f5);
         }
         else if (style == "danger")
         {
@@ -242,7 +238,7 @@ public:
             // Onglet d'un contrôle segmenté : seul l'onglet actif a un fond
             const bool on = button.getToggleState();
             fill    = on ? Theme::raised : juce::Colours::transparentBlack;
-            outline = on ? juce::Colour (0xff2c303d) : juce::Colours::transparentBlack;
+            outline = on ? Theme::border.brighter (0.08f) : juce::Colours::transparentBlack;
 
             if (! on && isHighlighted)
                 fill = Theme::raised.withAlpha (0.45f);
@@ -256,8 +252,8 @@ public:
         else if (style == "secondary")
         {
             // Bouton secondaire à fond uni, posé sur une carte #11131A
-            fill    = juce::Colour (0xff1a1d27);
-            outline = juce::Colour (0xff2c303d);
+            fill    = Theme::raised;
+            outline = Theme::border.brighter (0.08f);
         }
 
         if (! button.isEnabled())
@@ -291,7 +287,9 @@ public:
         const auto style = styleOf (button);
         juce::Colour colour = Theme::text;
 
-        if (style == "primary" || style == "danger")
+        if (style == "primary")
+            colour = Theme::background;
+        else if (style == "danger")
             colour = juce::Colours::white;
         else if (style == "chip")
             colour = button.getToggleState() ? accentOf (button) : Theme::textDim;

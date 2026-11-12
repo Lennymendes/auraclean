@@ -102,4 +102,33 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UpdateChecker)
 };
 
+//==============================================================================
+/** Télécharge le .dmg de la mise à jour dans ~/Téléchargements (thread dédié), sans passer par le navigateur.
+    Les callbacks sont appelés sur le MESSAGE THREAD. */
+class UpdateDownloader : private juce::Thread
+{
+public:
+    using Progress = std::function<void (float)>;                                   // 0..1, ou -1 si taille inconnue
+    using Done     = std::function<void (const juce::File&, const juce::String&)>;  // erreur vide = succès
+
+    UpdateDownloader();
+    ~UpdateDownloader() override;
+
+    /** Vrai si l'URL désigne directement un fichier .dmg (sinon : simple page web à ouvrir). */
+    static bool isDirectDownload (const juce::URL&);
+
+    bool isDownloading() const noexcept { return isThreadRunning(); }
+    void start (const juce::URL& dmgUrl, const juce::String& version, Progress onProgress, Done onDone);
+
+private:
+    void run() override;
+
+    juce::URL    url;
+    juce::String version;
+    Progress     progress;
+    Done         done;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UpdateDownloader)
+};
+
 } // namespace aura

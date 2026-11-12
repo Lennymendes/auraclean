@@ -122,7 +122,7 @@ public:
             setUsingNativeTitleBar (true);
             setContentOwned (new aura::MainComponent(), true);
             setResizable (true, true);
-            setResizeLimits (1180, 640, 10000, 10000);
+            setResizeLimits (1280, 640, 10000, 10000);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

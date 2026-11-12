@@ -26,11 +26,14 @@ enum class PluginFormat : int
 {
     VST3 = 0,
     AU   = 1,
-    AAX  = 2
+    AAX  = 2,
+    VST2 = 3,  // .vst  (/Library/Audio/Plug-Ins/VST)
+    CLAP = 4   // .clap (/Library/Audio/Plug-Ins/CLAP)
 };
 
-inline constexpr int kNumFormats = 3;
-inline constexpr std::array<PluginFormat, kNumFormats> kAllFormats { PluginFormat::VST3, PluginFormat::AU, PluginFormat::AAX };
+inline constexpr int kNumFormats = 5;
+inline constexpr std::array<PluginFormat, kNumFormats> kAllFormats { PluginFormat::VST3, PluginFormat::AU, PluginFormat::AAX,
+                                                                     PluginFormat::VST2, PluginFormat::CLAP };
 
 juce::String formatLabel (PluginFormat);      // "VST3" / "AU" / "AAX"
 juce::String formatExtension (PluginFormat);  // ".vst3" / ".component" / ".aaxplugin"

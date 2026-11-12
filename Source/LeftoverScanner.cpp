@@ -55,7 +55,8 @@ namespace
     bool isPluginBundleName (const juce::String& name)
     {
         const auto lower = name.toLowerCase();
-        return lower.endsWith (".vst3") || lower.endsWith (".component") || lower.endsWith (".aaxplugin");
+        return lower.endsWith (".vst3") || lower.endsWith (".component") || lower.endsWith (".aaxplugin")
+            || lower.endsWith (".vst") || lower.endsWith (".clap");
     }
 
     /** Noms trop génériques pour identifier un plugin, même s'ils correspondent. */
@@ -331,7 +332,7 @@ namespace
     {
         const auto lower = path.toLowerCase();
 
-        for (const char* ext : { ".vst3", ".component", ".aaxplugin" })
+        for (const char* ext : { ".vst3", ".component", ".aaxplugin", ".clap", ".vst" })
         {
             const auto e = juce::String (ext);
             int index = lower.indexOf (e + "/");
@@ -597,6 +598,15 @@ std::vector<LeftoverScanner::SearchRoot> LeftoverScanner::searchRoots()
         roots.push_back ({ base.getChildFile ("Caches"),              LeftoverCategory::Caches,             user });
         roots.push_back ({ base.getChildFile ("Logs"),                LeftoverCategory::Logs,               user });
     }
+
+    // Traces laissées par les versions standalone et les interfaces web embarquées (par bundle id)
+    for (const char* sub : { "Saved Application State", "HTTPStorages", "WebKit", "Application Scripts" })
+        roots.push_back ({ home.getChildFile ("Library").getChildFile (sub), LeftoverCategory::Caches, true });
+
+    // Contenu partagé installé hors des dossiers de plugins
+    roots.push_back ({ juce::File ("/Library/Audio/Impulse Responses"),        LeftoverCategory::ApplicationSupport, false, true });
+    roots.push_back ({ juce::File ("/Library/Audio/Sounds"),                   LeftoverCategory::ApplicationSupport, false, true });
+    roots.push_back ({ juce::File ("/Library/Application Support/Avid/Audio/Plug-In Settings"), LeftoverCategory::Presets, false });
 
     roots.push_back ({ juce::File ("/Users/Shared"),                                  LeftoverCategory::Shared,         false });
     roots.push_back ({ home.getChildFile ("Documents/VST3 Presets"),                  LeftoverCategory::UserPresets,    true });

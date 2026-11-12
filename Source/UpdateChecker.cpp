@@ -314,4 +314,151 @@ void UpdateChecker::setAutoCheckEnabled (bool enabled)
     settings.saveIfNeeded();
 }
 
+//==============================================================================
+//  UpdateDownloader
+//==============================================================================
+namespace
+{
+    constexpr juce::int64 kMaxDmgBytes = 600LL * 1024 * 1024;
+    constexpr juce::int64 kMinDmgBytes = 200LL * 1024;
+}
+
+UpdateDownloader::UpdateDownloader() : juce::Thread ("AuraClean Update Download") {}
+
+UpdateDownloader::~UpdateDownloader()
+{
+    stopThread (12000);
+}
+
+bool UpdateDownloader::isDirectDownload (const juce::URL& u)
+{
+    auto path = u.toString (false).toLowerCase();
+
+    for (const char* stop : { "?", "#" })
+        path = path.upToFirstOccurrenceOf (stop, false, false);
+
+    return path.endsWith (".dmg");
+}
+
+void UpdateDownloader::start (const juce::URL& dmgUrl, const juce::String& newVersion, Progress onProgress, Done onDone)
+{
+    if (isThreadRunning())
+        return;
+
+    url      = dmgUrl;
+    version  = newVersion.retainCharacters ("0123456789.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-");
+    progress = std::move (onProgress);
+    done     = std::move (onDone);
+    startThread (juce::Thread::Priority::normal);
+}
+
+void UpdateDownloader::run()
+{
+    auto finish = [this] (const juce::File& file, const juce::String& error)
+    {
+        juce::MessageManager::callAsync ([cb = done, file, error] { if (cb) cb (file, error); });
+    };
+
+    if (! UpdateChecker::isTrustedDownloadUrl (url) || ! isDirectDownload (url))
+    {
+        finish ({}, txt ("Lien de téléchargement refusé."));
+        return;
+    }
+
+    int statusCode = 0;
+    const auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                             .withConnectionTimeoutMs (15000)
+                             .withNumRedirectsToFollow (5)  // GitHub redirige vers son CDN de fichiers
+                             .withStatusCode (&statusCode)
+                             .withExtraHeaders ("User-Agent: AuraClean (macOS)\r\nAccept: application/octet-stream")
+                             .withProgressCallback ([this] (int, int) { return ! threadShouldExit(); });
+
+    auto stream = url.createInputStream (options);
+
+    if (threadShouldExit())
+        return;
+
+    if (stream == nullptr || (statusCode != 0 && (statusCode < 200 || statusCode >= 300)))
+    {
+        finish ({}, statusCode == 404 ? txt ("Fichier de mise à jour introuvable sur le serveur (404).")
+                                      : txt ("Téléchargement impossible. Vérifiez votre connexion Internet."));
+        return;
+    }
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Downloads");
+    folder.createDirectory();
+
+    const auto target = folder.getChildFile ("AuraClean-" + (version.isNotEmpty() ? version : juce::String ("update")) + ".dmg");
+    const auto part   = target.withFileExtension (".dmg.part");
+    part.deleteFile();
+
+    const auto total = stream->getTotalLength();
+    juce::int64 received = 0;
+    juce::String error;
+
+    {
+        juce::FileOutputStream out (part);
+
+        if (! out.openedOk())
+        {
+            finish ({}, txt ("Impossible d'écrire dans le dossier Téléchargements."));
+            return;
+        }
+
+        juce::HeapBlock<char> buffer (65536);
+        auto lastReport = juce::Time::getMillisecondCounter();
+
+        while (! stream->isExhausted())
+        {
+            if (threadShouldExit())
+            {
+                out.flush();
+                part.deleteFile();
+                return;
+            }
+
+            const auto n = stream->read (buffer, 65536);
+
+            if (n < 0) { error = txt ("Téléchargement interrompu."); break; }
+            if (n == 0) break;
+
+            if (! out.write (buffer, (size_t) n)) { error = txt ("Espace disque insuffisant."); break; }
+
+            received += n;
+
+            if (received > kMaxDmgBytes) { error = txt ("Fichier de mise à jour anormalement volumineux."); break; }
+
+            if (const auto now = juce::Time::getMillisecondCounter(); now - lastReport > 80)
+            {
+                lastReport = now;
+                const float value = total > 0 ? juce::jlimit (0.0f, 1.0f, (float) ((double) received / (double) total)) : -1.0f;
+                juce::MessageManager::callAsync ([cb = progress, value] { if (cb) cb (value); });
+            }
+        }
+
+        out.flush();
+    }
+
+    if (error.isEmpty() && (received < kMinDmgBytes || (total > 0 && received != total)))
+        error = txt ("Téléchargement incomplet. Réessayez.");
+
+    if (error.isNotEmpty())
+    {
+        part.deleteFile();
+        finish ({}, error);
+        return;
+    }
+
+    target.deleteFile();
+
+    if (! part.moveFileTo (target))
+    {
+        part.deleteFile();
+        finish ({}, txt ("Impossible d'enregistrer la mise à jour dans Téléchargements."));
+        return;
+    }
+
+    finish (target, {});
+}
+
 } // namespace aura
